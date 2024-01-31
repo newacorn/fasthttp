@@ -42,14 +42,23 @@ var uriPool = &sync.Pool{
 type URI struct {
 	noCopy noCopy
 
+	// 请求的原始路径，但是也会将重复的///删除的只剩下一个
+	// 重复的 %2F 删除的只剩下一个。
+	// 不包括查询和片段信息
 	pathOriginal []byte
 	scheme       []byte
-	path         []byte
-	queryString  []byte
-	hash         []byte
-	host         []byte
+	// 不包括查询和片段信息
+	// 解码后的路径，多个连续的///删除到只剩一个。
+	path []byte
+	// 查询字符串，未解码的。
+	queryString []byte
+	hash        []byte
+	host        []byte
 
-	queryArgs       Args
+	// 解码后的键值对，懒解析。
+	queryArgs Args
+	// 当调用 QueryArgs 方法时进行解析。
+	// 此字段用于防止重复解析。
 	parsedQueryArgs bool
 
 	// Path values are sent as-is without normalization.
@@ -61,10 +70,19 @@ type URI struct {
 	// extra slashes are removed, special characters are encoded.
 	DisablePathNormalizing bool
 
-	fullURI    []byte
+	// 懒设置只有在调用 FullURI 方法后才设置此值
+	// 包括 协议+host+port+ requestURI + hash。
+	// pathOriginal 。
+	fullURI []byte
+	// 懒设置，只有在调用了 RequestURI 后才就那些拼凑
+	// 查询字符串经过编码了，请求路径如果 DisablePathNormalizing 是false，使用 path ，否则使用
+	// RequestURI
+	// 不包括协议、host、port和hash。
 	requestURI []byte
 
+	// 如果存在服务端会设置此值
 	username []byte
+	// 如果存在服务端会设置此值
 	password []byte
 }
 

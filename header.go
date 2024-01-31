@@ -61,36 +61,70 @@ type ResponseHeader struct {
 type RequestHeader struct {
 	noCopy noCopy
 
-	disableNormalizing   bool
-	noHTTP11             bool
-	connectionClose      bool
+	// 继承自：Server.DisableHeaderNamesNormalizing
+	disableNormalizing bool
+	// 在 parseFirstLine 方法中设置
+	noHTTP11 bool
+	// 在 parseHeaders 中设置
+	connectionClose bool
+	// 客户端使用
 	noDefaultContentType bool
+	// 默认值为false，即在解析请求头时几个特殊的头解析到专有字段中，而不是全部存储到h.h中。
 	disableSpecialHeader bool
 
 	// These two fields have been moved close to other bool fields
 	// for reducing RequestHeader object size.
+	//
+	// cookie 响应头是否从h.h 解码到 cookies 字段中了。
+	// 设置此字段是为了避免再次解析。
 	cookiesCollected bool
 
-	contentLength         int
-	contentLengthBytes    []byte
+	// 解析错误设置为-2
+	// 如果有Transfer-Encoding请求头，此字段会设置为-1。无论请求中是否显式设置。
+	// 在 parseHeaders 中设置
+	contentLength int
+	// contentLength 字符串的字节表示形式
+	// 在 parseHeaders 中设置
+	contentLengthBytes []byte
+	// 继承自 Server.SecureErrorLogMessage
 	secureErrorLogMessage bool
 
-	method      []byte
-	requestURI  []byte
-	proto       []byte
-	host        []byte
+	// 在 parseFirstLine 方法中设置
+	method []byte
+	// 在 parseFirstLine 方法中设置
+	// 原始请求路径，未解码
+	// Request
+	requestURI []byte
+	// 在 parseFirstLine 方法中设置
+	proto []byte
+	// 在 parseHeaders 中设置
+	host []byte
+	// 在 parseHeaders 中设置
 	contentType []byte
-	userAgent   []byte
-	mulHeader   [][]byte
+	// 在 parseHeaders 中设置
+	userAgent []byte
+	// 在获取一个键(请求头名)对应的所有值时，用于存储这些者。
+	// 此字段是为了避免堆内存分配。
+	mulHeader [][]byte
 
-	h       []argsKV
+	// 请求头的原始数据
+	// 不包括 host trailer userAgent contentType Connection ConnectionLength
+	// 在 parseHeaders 中设置
+	h []argsKV
+	// 尾部请求头列表
+	// 在 parseHeaders 中设置
 	trailer []argsKV
-	bufKV   argsKV
+	// 用于存储临时请求头名和值，避免堆内存分配。
+	bufKV argsKV
 
+	// 解码过的cookie键值对列表
+	// 在 collectCookies 方法中设置
+	// 从h.h中解码而来，并将原始内容移到h.h的尾部，通过改变h.h的长度使其不可见。
 	cookies []argsKV
 
 	// stores an immutable copy of headers as they were received from the
 	// wire.
+	// 除了请求头行之外的请求头内容，不包括表示请求头结束的\r\n。
 	rawHeaders []byte
 }
 
@@ -1110,6 +1144,7 @@ func (h *RequestHeader) Reset() {
 	h.resetSkipNormalize()
 }
 
+// 重置RequestHeader的非格式化设置字段
 func (h *RequestHeader) resetSkipNormalize() {
 	h.noHTTP11 = false
 	h.connectionClose = false
@@ -2714,11 +2749,13 @@ func (h *RequestHeader) parse(buf []byte) (int, error) {
 		return 0, err
 	}
 
+	// 将原始请求头设置到h.rawHeaders字段中
 	h.rawHeaders, _, err = readRawHeaders(h.rawHeaders[:0], buf[m:])
 	if err != nil {
 		return 0, err
 	}
 	var n int
+	// 解析请求头，提取键值对h.h中。
 	n, err = h.parseHeaders(buf[m:])
 	if err != nil {
 		return 0, err
@@ -3010,6 +3047,9 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	return len(buf) - len(s.b), err
 }
 
+// buf中包含的是排除请求行之外的请求头内容
+// 将请求头中的原始数据解析成键值对的形式存储到h.h中。
+// 但几个特殊常用的请求头解析到特定字段中方便读取。
 func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 	h.contentLength = -2
 
@@ -3109,6 +3149,9 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 	return s.hLen, nil
 }
 
+// 将cookie请求头从h.h中解码后设置到 cookies 字段中。
+// 原有的位置移动到最后一个位置，后面的原始向前移动。将设置新的h.h长度，cap没有变，内容
+// 也没有变，只是将cookie对应的键值对都移动到了末尾，然后通过减小h.h的长度，遮蔽尾部cookie。
 func (h *RequestHeader) collectCookies() {
 	if h.cookiesCollected {
 		return

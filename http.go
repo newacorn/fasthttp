@@ -43,39 +43,78 @@ type Request struct {
 	// Copying Header by value is forbidden. Use pointer to Header instead.
 	Header RequestHeader
 
-	uri      URI
+	// 对于服务端来说，通过调用 parseURI 方法将请求头中的Hos+path+isTls字段解析到uri中。
+	// 当调用 URI 方法时，其调用 parseURI 进行解析。
+	// 	req.SetRequestURI("http://127.0.0.1:7777/" + url.PathEscape("///他/a//"))
+	//  path=/他/a/
+	//  originPath /%E4%BB%96/a/
+	//
+	//		println(url.PathEscape("/////他/a"))
+	//      %2F%2F%2F%2F%2F%E4%BB%96%2Fa
+	uri URI
+	// x-www型表单的数据存储在此字段
 	postArgs Args
 
+	// 当将 Server.StreamBody 设置为true时，会设置此字段。
 	bodyStream io.Reader
-	w          requestBodyWriter
-	body       *bytebufferpool.ByteBuffer
-	bodyRaw    []byte
+	// 一个 io.Writer类型的字段，其引用了所在的
+	// Request.
+	w requestBodyWriter
+	// 请求体的内容会预读到此字段中.
+	body *bytebufferpool.ByteBuffer
+	// 只与客户端使用有关。
+	bodyRaw []byte
 
-	multipartForm         *multipart.Form
+	// multi表单数据。
+	multipartForm *multipart.Form
+	// multi型表单分界字符串。
 	multipartFormBoundary string
+	// 设置为 Server.SecureErrorLogMessage 字段的值。
+	// 如果设置为true，这对于错误的描述使用通用语句。
 	secureErrorLogMessage bool
 
 	// Group bool members in order to reduce Request object size.
-	parsedURI      bool
+	//
+	// uri 字段是否包含一个非nil的URL实例。
+	// 通过调用 SetURI 方法，来随着uri字段时，如果uri不为nil。
+	// 会将此字段设置为true，否则将此字段设置为true。
+	parsedURI bool
+	// 请求体中的x-www表单是否已经解析好了。
 	parsedPostArgs bool
 
+	// 重置 RequestCtx 时，是否将 body 字段中的缓存释放掉。
 	keepBodyBuffer bool
 
 	// Used by Server to indicate the request was received on a HTTPS endpoint.
 	// Client/HostClient shouldn't use this field but should depend on the uri.scheme instead.
+	//
+	// 对于服务端来是，是通过判断net.Conn是否是个TLS连接来设置的。
+	// 在 Server.serveConn 方法中完成。
 	isTLS bool
 
 	// Request timeout. Usually set by DoDeadline or DoTimeout
 	// if <= 0, means not set
+	//
+	// 客户端使用
 	timeout time.Duration
 
 	// Use Host header (request.Header.SetHost) instead of the host from SetRequestURI, SetHost, or URI().SetHost
+	//
+	// 对于客户端来说，一个请求必须设置Host请求头,
+	// 要么显式设置要么从请求路径中获取。
+	// 此字段决定了应该使用哪种来源。
+	// 如果此字段为false，则会使用 uri 字段中Host作为请求头Host的值
+	// 即使已经设置了Host请求头也会别覆盖。
+	//
+	// 客户端使用
 	UseHostHeader bool
 
 	// DisableRedirectPathNormalizing disables redirect path normalization when used with DoRedirects.
 	//
 	// By default redirect path values are normalized, i.e.
 	// extra slashes are removed, special characters are encoded.
+	//
+	// 关闭对重定向链接的格式/编码。
 	DisableRedirectPathNormalizing bool
 }
 
@@ -99,26 +138,45 @@ type Response struct {
 
 	// StreamBody enables response body streaming.
 	// Use SetBodyStream to set the body stream.
+	//
+	// 设置为true，对于multipart类型的表单请求没有影响(且没有关闭Server的multipart表单预读设置)。其 bodyStream 中没有内容可读马上返回io.EOF。
+	// 即使此字段设置为true，依旧会对请求体进行预读，如果预读内容超过了writerBuffer(4KB)，则会用已经读取的
+	// 内容和请求的net.Conn 构成一个io.Reader赋值给bodyStream字段。
+	//
+	// 还有此字段设作为true之后，MaxRequestBody的限制将不再起作用。
 	StreamBody bool
 
+	// 当StreamBody设置为true后，服务端会利用请求数据构建一个io.Reader赋值给此字段。
 	bodyStream io.Reader
-	w          responseBodyWriter
-	body       *bytebufferpool.ByteBuffer
-	bodyRaw    []byte
+	// 一个写包装了所属Response的io.Writer
+	// BodyWriter 方法返回的即使此值。
+	w responseBodyWriter
+	// 缓存，发送RequestHandler中往响应中写内容时，很多方法都是将内容追加到此字段。
+	body *bytebufferpool.ByteBuffer
+	// 通过SetRaw方法设置的响应会存储到此字段。
+	bodyRaw []byte
 
 	// Response.Read() skips reading body if set to true.
 	// Use it for reading HEAD responses.
 	//
 	// Response.Write() skips writing body if set to true.
 	// Use it for writing HEAD responses.
+	//
+	// 对服务端来说是不发送响应体。
+	// 对请求端来说是不读取响应体。
 	SkipBody bool
 
-	keepBodyBuffer        bool
+	// 是否在RequestCtx.reset时，是否将Response.body释放。
+	keepBodyBuffer bool
+	// 将错误消息使用通用语句描述。
+	// Server.SecureErrorLogMessage 字段的值会赋值给此字段
 	secureErrorLogMessage bool
 
 	// Remote TCPAddr from concurrently net.Conn.
+	// 客户端请求信息
 	raddr net.Addr
 	// Local TCPAddr from concurrently net.Conn.
+	// 服务端请求信息。
 	laddr net.Addr
 }
 
@@ -1897,6 +1955,7 @@ func (resp *Response) Write(w *bufio.Writer) error {
 		return err
 	}
 	if sendBody {
+
 		if _, err := w.Write(body); err != nil {
 			return err
 		}
@@ -2066,7 +2125,7 @@ type httpWriter interface {
 }
 
 func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
-	vbuf := copyBufPool.Get()
+	vbuf := CopyBufPool.Get()
 	buf := vbuf.([]byte)
 
 	var err error
@@ -2090,7 +2149,7 @@ func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
 		}
 	}
 
-	copyBufPool.Put(vbuf)
+	CopyBufPool.Put(vbuf)
 	return err
 }
 
@@ -2135,14 +2194,14 @@ func copyZeroAlloc(w io.Writer, r io.Reader) (int64, error) {
 	if rt, ok := w.(io.ReaderFrom); ok {
 		return rt.ReadFrom(r)
 	}
-	vbuf := copyBufPool.Get()
+	vbuf := CopyBufPool.Get()
 	buf := vbuf.([]byte)
 	n, err := io.CopyBuffer(w, r, buf)
-	copyBufPool.Put(vbuf)
+	CopyBufPool.Put(vbuf)
 	return n, err
 }
 
-var copyBufPool = sync.Pool{
+var CopyBufPool = sync.Pool{
 	New: func() any {
 		return make([]byte, 4096)
 	},

@@ -14,29 +14,54 @@ import (
 // incoming connection.
 //
 // Such a scheme keeps CPU caches hot (in theory).
+// 每个worker在单独的一个协程中执行关联一个 workerChan，使用for循环阻塞在
+// workerChan.ch 上。
+//
+// 当 Server.Serve 从net.Listener中获取新的net.Conn时
+// 会创建一个新的worker或者从ready队列中取旧的worker，将net.Conn
+// 发送到worker关联的 workerChan。
 type workerPool struct {
 	// Function for serving server connections.
 	// It must leave c unclosed.
+	//
+	// 设置为Server.serveConn
 	WorkerFunc ServeHandler
-
+	// 设置为Server.getConcurrency的返回值。
 	MaxWorkersCount int
-
+	// 设置为 Server.LogAllErrors字段
 	LogAllErrors bool
-
+	// 设置为 Server.MaxIdleWorkerDuration
+	// 默认为10s
 	MaxIdleWorkerDuration time.Duration
-
+	// 设置为Server.logger()的返回值
 	Logger Logger
 
-	lock         sync.Mutex
+	// 保护ready字段的读写
+	lock sync.Mutex
+	// 当前正在服务于net.Conn的workerChan实例的数量。
 	workersCount int
-	mustStop     bool
+	// 当从net.Listener中接收连接时遇到错误会将此字段设置为true。
+	// 其表示fastHttp服务应当停止。
+	//
+	// workerFunc 的for循环中，在服务完一个net.Conn后，会调用
+	// release 方法将workerChan放回ready列表中，在release方法中，
+	// 如果检查此字段为true会返回false，release返回false导致上面的for循环退出。
+	// 从而会让关联的worker协程退出。
+	mustStop bool
 
+	// 空闲workerChan列表
 	ready []*workerChan
 
+	// 从net.Listener中获取连接时，如果返回错误则会调用 Stop 方法
+	// 其会关闭此通道。
+	//
+	// 此通道的关闭用于通知 Start 方法启动的用于清除worker(超过 MaxIdleWorkerDuration)的协程退出。
 	stopCh chan struct{}
-
+	// workerChan 缓冲池
 	workerChanPool sync.Pool
 
+	// 设置为 Server.setState
+	// 其内部调用 Server.ConnState 字段设置的钩子函数。
 	connState func(net.Conn, ConnState)
 }
 
@@ -70,6 +95,7 @@ func (wp *workerPool) Start() {
 	}()
 }
 
+// Stop 当从ne.Listener中获取连接遇到错误时，会调用此方法。
 func (wp *workerPool) Stop() {
 	if wp.stopCh == nil {
 		return
@@ -221,6 +247,7 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 			break
 		}
 
+		// [[Server.serverConn]]
 		if err = wp.WorkerFunc(c); err != nil && err != errHijacked {
 			errStr := err.Error()
 			if wp.LogAllErrors || !(strings.Contains(errStr, "broken pipe") ||

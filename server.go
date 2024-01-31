@@ -158,16 +158,33 @@ type Server struct {
 	//
 	// The following is a non-exhaustive list of errors that can be expected as argument:
 	//   * io.EOF
+	//   io.EOF错误在读取非 chunked 请求体时，可能会遇到且会传递给此字段处理。
+	//   如果在读取请求头时遇到 io.EOF，则会直接跳出Server.serveConn函数中的for循环。
+	//   不会使用此字段处理此错误。
+	//   chunked 请求体中间遇到此错误会转换为ErrBrokenChunks错误。
+	//
+	// 	 if err = req.ReadBody(r, contentLength, maxBodySize); err != nil { return err }
 	//   * io.ErrUnexpectedEOF
+	//   在以流的形式读取请求体时可能会遇到此类错误。
 	//   * ErrGetOnly
+	//   请求是非GET/HEAD请求，且设置了GetOnly为true
 	//   * ErrSmallBuffer
+	//   当读取请求头时，如果请求头太长会导致对 bytes.Buffer 不断地进行值越大越大的Peek操作，从而导致其返回 OutOfBuffer 错误，
+	//   fasthttp将其转换为 ErrSmallBuffer 错误。
 	//   * ErrBodyTooLarge
+	//   在读取chunked编码的请求体时，如果提前结束或者不符规格会返回此类错误。
 	//   * ErrBrokenChunks
+	//
+	// 默认值是 defaultErrorHandler
+	// Server.writeErrorResponse 会使用此字段
 	ErrorHandler func(ctx *RequestCtx, err error)
 
 	// HeaderReceived is called after receiving the header.
 	//
 	// Non zero RequestConfig field values will overwrite the default configs
+	//
+	// 通过设置此函数，可以定义每次HTTP请求的不同部分的超时设置。
+	// 读请求体的超时、写响应头+响应体的超时和 MaxRequestBodySize 请求体的大小限制。
 	HeaderReceived func(header *RequestHeader) RequestConfig
 
 	// ContinueHandler is called after receiving the Expect 100 Continue Header.
@@ -179,11 +196,15 @@ type Server struct {
 	//
 	// The default is to automatically read request bodies of Expect 100 Continue requests
 	// like they are normal requests.
+	//
+	// 返回false，拒绝 Expect 100 请求。
 	ContinueHandler func(header *RequestHeader) bool
 
 	// Server name for sending in response headers.
 	//
 	// Default server name is used if left blank.
+	//
+	// 响应头server的值。
 	Name string
 
 	// The maximum number of concurrent connections the server may serve.
@@ -192,6 +213,9 @@ type Server struct {
 	//
 	// Concurrency only works if you either call Serve once, or only ServeConn multiple times.
 	// It works with ListenAndServe as well.
+	// 最多能同时服务多个net.Conn。
+	// 也是workerPool.MaxWorkersCount字段设置值的来源。
+	// 作为Server.getConcurrency的返回值之一。
 	Concurrency int
 
 	// Per-connection buffer size for requests' reading.
@@ -201,11 +225,20 @@ type Server struct {
 	// and/or multi-KB headers (for example, BIG cookies).
 	//
 	// Default buffer size is used if not set.
+	//
+	// 默认值是4KB。
+	// 此值只会影响到请求头的读取，因为请求头的需全部存储到一个 bytes.Buffer 中。而此值影响到了
+	// bytes.Buffer 底层缓存的大小。
 	ReadBufferSize int
 
 	// Per-connection buffer size for responses' writing.
 	//
 	// Default buffer size is used if not set.
+	//
+	// 默认值 defaultWriteBufferSize
+	// 4KB 不影响响应体的大小限制
+	// 发送的内容->Response.Body->bytes.Buffer->net.Conn
+	// 发送的内容->bytes.Buffer->fast.pipe->net.Conn
 	WriteBufferSize int
 
 	// ReadTimeout is the amount of time allowed to read
@@ -214,6 +247,11 @@ type Server struct {
 	// keep-alive connections after the first byte has been read.
 	//
 	// By default request read timeout is unlimited.
+	//
+	// 当从net.Conn中读取到第一个字节后，调用 net.Conn.SetReadDeadline 方法设置此字段
+	// 作为超时时间。
+	// 所以是请求头和请求体的读超时。
+	// 默认值0，表示没有超时限制。
 	ReadTimeout time.Duration
 
 	// WriteTimeout is the maximum duration before timing out
@@ -221,17 +259,28 @@ type Server struct {
 	// has returned.
 	//
 	// By default response write timeout is unlimited.
+	//
+	// 从 RequestHandler 返回后，调用 net.Conn.SetWriteDeadline 方法设置写超时。
+	// 包括响应头和响应体的写。
+	// 默认值是0，表示没有超时限制。
 	WriteTimeout time.Duration
 
 	// IdleTimeout is the maximum amount of time to wait for the
 	// next request when keep-alive is enabled. If IdleTimeout
 	// is zero, the value of ReadTimeout is used.
+	//
+	// 从第二个http请求开始，从net.Conn中获取请求的第一个字节的超时时间。
+	// 如果此值为0，则使用ReadTimeout的值如果是非0的话。
+	// 默认没有超时限制。
 	IdleTimeout time.Duration
 
 	// Maximum number of concurrent client connections allowed per IP.
 	//
 	// By default unlimited number of concurrent connections
 	// may be established to the server from a single IP address.
+	// 限制同一IP的连接数
+	// 发生响应：s.writeFastError(c, StatusTooManyRequests, "The number of connections from your ip exceeds MaxConnsPerIP")
+	// 关闭这个限制以外的连接(net.Conn)
 	MaxConnsPerIP int
 
 	// Maximum number of requests served per connection.
@@ -240,6 +289,10 @@ type Server struct {
 	// 'Connection: close' header is added to the last response.
 	//
 	// By default unlimited number of requests may be served per connection.
+	//
+	// 一个net.Conn可以累计服务的http请求数量上限
+	// 达到这个限制之后，在响应时会发送Connection: close响应头。
+	// 并关闭此net.Conn。
 	MaxRequestsPerConn int
 
 	// MaxKeepaliveDuration is a no-op and only left here for backwards compatibility.
@@ -248,18 +301,29 @@ type Server struct {
 
 	// MaxIdleWorkerDuration is the maximum idle time of a single worker in the underlying
 	// worker pool of the Server. Idle workers beyond this time will be cleared.
+	//
+	// 一个worker对应一个协程，当服务完一个net.Conn后，会将其放置到 ready 列表中，
+	// 有一个专门检查的协程，会遍历ready队列，当发现有workerChan在队列中的持续时长大于此
+	// 字段时，像workerChan.ch 发送nil，已通知worker的关联协程退出。
 	MaxIdleWorkerDuration time.Duration
 
 	// Period between tcp keep-alive messages.
 	//
 	// TCP keep-alive period is determined by operation system by default.
+	//
+	// Tcp连接在多久没有收到包后发送keep-alive心跳包。
 	TCPKeepalivePeriod time.Duration
 
 	// Maximum request body size.
 	//
 	// The server rejects requests with bodies exceeding this limit.
 	//
-	// Request body size is limited by DefaultMaxRequestBodySize by default.
+	// Request body size is limited by DefaultMaxRequestBodySize(4MB) by default.
+	//
+	// 当请求头中的Content-Length>0时，在读取请求体之前直接与此字段进行比较，如果大于此此字段
+	// 则返回 ErrTooLarge 错误，像客户端发送错误响应之后会关闭此连接(net.Conn)。
+	// 当请求头中的Content-Length=0/-1时，在读取时进行累加如果超过此字段一样会返回ErrTooLarge错误。
+	// 然后关闭连接。
 	MaxRequestBodySize int
 
 	// Whether to disable keep-alive connections.
@@ -268,6 +332,8 @@ type Server struct {
 	// the first response to client if this option is set to true.
 	//
 	// By default keep-alive connections are enabled.
+	//
+	// 在响应中设置Connection: Close 响应头，并在发送完响应后关闭此连接。
 	DisableKeepalive bool
 
 	// Whether to enable tcp keep-alive connections.
@@ -275,6 +341,7 @@ type Server struct {
 	// Whether the operating system should send tcp keep-alive messages on the tcp connection.
 	//
 	// By default tcp keep-alive connections are disabled.
+	// 是否发送TCP的keep-alive心跳包，默认此值为false。
 	TCPKeepalive bool
 
 	// Aggressively reduces memory usage at the cost of higher CPU usage
@@ -285,6 +352,9 @@ type Server struct {
 	// usage by more than 50%.
 	//
 	// Aggressive memory usage reduction is disabled by default.
+	//
+	// 比如每个Server.serveConn方法中会保留一个writeBuffer和一个readBuffer。
+	// 都是4KB的bytes.Buffer对象，而不是每次使用后都放回缓冲池。
 	ReduceMemoryUsage bool
 
 	// Rejects all non-GET requests if set to true.
@@ -294,6 +364,9 @@ type Server struct {
 	// by ReadBufferSize if GetOnly is set.
 	//
 	// Server accepts all the requests by default.
+	//
+	// 如果请求不是Get或Head，则返回 ErrGetOnly 错误，在想客户端发送错误响应后
+	// 会关闭此连接(net.Conn)。
 	GetOnly bool
 
 	// Will not pre parse Multipart Form data if set to true.
@@ -302,6 +375,10 @@ type Server struct {
 	// multipart form data as a binary blob, or choose when to parse the data.
 	//
 	// Server pre parses multipart form data by default.
+	//
+	// 用于存储字段和部分文件的上限是defaultMaxInMemoryFileSize(10MB)，不可配置。
+	// 是否提前解析MultipartForm，然后将表单字段和一部分文件存储到内存中，剩余的存储到文件中。
+	// 或者不解析直接原样保存到到缓冲中(上限同上10MB，不可配置)，需要时才进行解析。
 	DisablePreParseMultipartForm bool
 
 	// Logs all errors, including the most frequent
@@ -320,6 +397,13 @@ type Server struct {
 	// in the request/response.
 	//
 	// Server logs all full errors by default.
+	// ctx.Request.Header.secureErrorLogMessage = s.SecureErrorLogMessage
+	// ctx.Response.Header.secureErrorLogMessage = s.SecureErrorLogMessage
+	// ctx.Request.secureErrorLogMessage = s.SecureErrorLogMessage
+	// ctx.Response.secureErrorLogMessage = s.SecureErrorLogMessage
+	//
+	// 用通用语句来表述错误。
+	// "error when reading request trailer"<- "error when reading request trailer: %w"
 	SecureErrorLogMessage bool
 
 	// Header names are passed as-is without normalization
@@ -338,6 +422,8 @@ type Server struct {
 	//     * HOST -> Host
 	//     * content-type -> Content-Type
 	//     * cONTENT-lenGTH -> Content-Length
+	//
+	// 不对请求和响应的header进行规范化。
 	DisableHeaderNamesNormalizing bool
 
 	// SleepWhenConcurrencyLimitsExceeded is a duration to be slept of if
@@ -352,6 +438,9 @@ type Server struct {
 	// internal default value in its absence. With this option set to true,
 	// the only time a Server header will be sent is if a non-zero length
 	// value is explicitly provided during a request.
+	//
+	// 当次值为false(默认):使用显式设置的Server头 -> 使用 Name 字段来设置Server头 -> 使用内置默认值(fasthttp)
+	// 为false时，不会使用内置默认值(fasthttp)，而是：显式设置Server头-> 使用Name字段来设置Server头。
 	NoDefaultServerHeader bool
 
 	// NoDefaultDate, when set to true, causes the default Date
@@ -359,6 +448,8 @@ type Server struct {
 	//
 	// The default Date header value is the current date value. When
 	// set to true, the Date will not be present.
+	//
+	// 是否不自动设置Date 响应头，默认为false，即设置。
 	NoDefaultDate bool
 
 	// NoDefaultContentType, when set to true, causes the default Content-Type
@@ -366,6 +457,9 @@ type Server struct {
 	//
 	// The default Content-Type header value is the internal default value. When
 	// set to true, the Content-Type will not be present.
+	//
+	// 默认为false。如果未显式设置Content-Type，则使用defaultContentType = []byte("text/plain; charset=utf-8")
+	// 不可配置。
 	NoDefaultContentType bool
 
 	// KeepHijackedConns is an opt-in disable of connection
@@ -373,24 +467,38 @@ type Server struct {
 	// This allows to save goroutines, e.g. when fasthttp used to upgrade
 	// http connections to WS and connection goes to another handler,
 	// which will close it when needed.
+	//
+	// 当 HijackHandler 调用返回后，是否应该关闭此连接。
 	KeepHijackedConns bool
 
 	// CloseOnShutdown when true adds a `Connection: close` header when the server is shutting down.
+	//
+	// 当服务终止时: 1.关闭连接(net.Conn) 2.发送Connection:Close头+关闭(net.Conn)
+	// 当次字段时true是选2，否则选1。
 	CloseOnShutdown bool
 
 	// StreamRequestBody enables request body streaming,
 	// and calls the handler sooner when given body is
 	// larger than the current limit.
+	//
+	// 以流的形式读取请求体。
+	// 不过因为请求头读取的原因，请求体会预读一部分或者预读全部。最终的io.Reader将由
+	// 已读字节内容+底层连接构成。
 	StreamRequestBody bool
 
 	// ConnState specifies an optional callback function that is
 	// called when a client connection changes state. See the
 	// ConnState type and associated constants for details.
+	//
+	// 设置钩子函数，在net.Conn的状态改变时调用。
+	// 这些状态是由fasthttp定义的，与TCP协议无关。
 	ConnState func(net.Conn, ConnState)
 
 	// Logger, which is used by RequestCtx.Logger().
 	//
 	// By default standard logger from log package is used.
+	//
+	// 用于记录fasthttp server在服务时参数的错误日志。
 	Logger Logger
 
 	// TLSConfig optionally provides a TLS configuration for use
@@ -402,34 +510,72 @@ type Server struct {
 	// with methods like tls.Config.SetSessionTicketKeys.
 	// To use SetSessionTicketKeys, use Server.Serve with a TLS Listener
 	// instead.
+	// 服务端TLS配置
 	TLSConfig *tls.Config
 
 	// FormValueFunc, which is used by RequestCtx.FormValue and support for customizing
 	// the behaviour of the RequestCtx.FormValue function.
 	//
 	// NetHttpFormValueFunc gives a FormValueFunc func implementation that is consistent with net/http.
+	//
+	// RequestCtx.FormValue 函数返回值的逻辑
+	// 即MultiPart表单、x-www-formdata表单、查询中的值查询顺序
+	// 默认行为：defaultFormValue query->x-www->multi
+	// NetHttpFormValueFunc：x-www->multi->query
 	FormValueFunc FormValueFunc
 
+	// 自定义协议的处理函数
+	// 默认为空的map实例。
 	nextProtos map[string]ServeHandler
 
-	concurrency      uint32
-	concurrencyCh    chan struct{}
+	// 表示正在服务的链接数量(net.Conn)
+	// 从0开始计数，在Server.serveConn中原子递增，
+	// 在其注册的defer函数中递减。
+	// 受限于 Concurrency 字段设置的值，默认为 DefaultConcurrency
+	// (1024*256)。
+	// 其主要用于 GetCurrentConcurrency 方法的返回值。
+	concurrency uint32
+	// TimeoutWithCodeHandler
+	// cap为 maxWorkersCount ,最大服务连接数，默认为 1024*256
+	// Concurrency 或 DefaultConcurrency
+	concurrencyCh chan struct{}
+	// 注册ip的连接数，当开启了每个Ip可以打开的连接限制时会用到。
 	perIPConnCounter perIPConnCounter
 
-	ctxPool        sync.Pool
-	readerPool     sync.Pool
-	writerPool     sync.Pool
+	// RequestCtx 对象缓冲池
+	ctxPool sync.Pool
+	// 用来读取请求体的 bytes.Buffer 对象缓存池。
+	readerPool sync.Pool
+	// 用来缓存响应体的 bytes.Buffer 对象缓存池。
+	// 发送内容->Response.Body->bytes.Buffer->net.Conn
+	writerPool sync.Pool
+	// hijackConn 实例缓冲池
 	hijackConnPool sync.Pool
 
 	// We need to know our listeners and idle connections so we can close them in Shutdown().
+	//
+	// 服务器管理的 net.Listener 列表
 	ln []net.Listener
 
-	idleConns   map[net.Conn]time.Time
+	// 服务器管理的 net.Conn 列表，即net.Conn处理完一个请求后会存记录到这个列表中。
+	// 方便在shutDown时精确关闭。
+	idleConns map[net.Conn]time.Time
+	// 保护对 idleConns 列表的读写
 	idleConnsMu sync.Mutex
 
-	mu   sync.Mutex
+	// 协调 Serve 类函数与 ShutdownWithContext 的竞争关系。
+	// 要么先获取一个net.Listener后，关闭它。
+	// 要么是没有net.Listener(还未创建)可关闭。
+	mu sync.Mutex
+	// 打开的 net.Conn 数量
 	open int32
+	// 0或者1
+	// 由 ShutdownWithContext 方法设置此值为1.
+	// serveConn 方法中的for循环用到了此值(每次从net.Con中去读一个请求头之后，检查此值)，用于平滑的关闭一个链接(先发送Connection: Close，再关闭
+	// net.Conn)
 	stop int32
+	// RequestCtx.Err 中从此通道中读取内容。
+	// ShutdownWithContext 调用时关闭此通道。
 	done chan struct{}
 }
 
@@ -490,10 +636,16 @@ type RequestConfig struct {
 	// ReadTimeout is the maximum duration for reading the entire
 	// request body.
 	// A zero value means that default values will be honored.
+	//
+	// 请求体的读超时时间，不像 Server.ReadTimeout 包括请求头的读超时。
+	// 在读取请求头之后，如果设置了此字段(大于0）则会使用此字段调用 net.Conn.SetReadTimeout
 	ReadTimeout time.Duration
 	// WriteTimeout is the maximum duration before timing out
 	// writes of the response.
 	// A zero value means that default values will be honored.
+	//
+	// 在从 RequestHandler 返回后，会使用此字段或者Server.WriteTimeout(前者为0)来设置
+	// 响应发送的超时时间。
 	WriteTimeout time.Duration
 	// Maximum request body size.
 	// A zero value means that default values will be honored.
@@ -588,27 +740,55 @@ type RequestCtx struct {
 	// Copying Response by value is forbidden. Use pointer to Response instead.
 	Response Response
 
+	// UserValue 和 SetUserValue 方法用此字段来存储和获取键值对
+	// 在响应发送完毕之后释放。
 	userValues userData
 
-	connID         uint64
+	// 一个connId对应一个net.Conn
+	// 从0开开始，每次获取时将此字段的当前值递增1，所以第一个连接对应1
+	connID uint64
+	// 当前 RequestCtx 代表此底层net.Conn的第几个http请求。
 	connRequestNum uint64
-	connTime       time.Time
-	remoteAddr     net.Addr
-
+	// net.Conn 获取的时间，在 RequestCtx 初始化时设置
+	connTime time.Time
+	// net.Conn 对应的客户端IP地址
+	remoteAddr net.Addr
+	// 请求头和请求体读取完毕之后调用RequestHandler之后将此值设置为
+	// 当前时间。
 	time time.Time
 
+	// defaultLogger 或者 Server.logger
+	// 没有提供单独设置的方法。
+	// 包内没有使用此字段进行日志记录，应该在用户代码中使用。
 	logger ctxLogger
 	s      *Server
 	c      net.Conn
-	fbr    firstByteReader
+	// 当设置了 Server.ReduceMemoryUsage = true 时且才会用到
+	// 此结构体。其目的是为了在读取下一个请求之前，释放RequestCtx上占有的资源
+	// 因为等待下一个请求的时间不确定。
+	// 靠一个字节大小的ch字段阻塞在net.Conn读上，就可以知道何时有响应到来。等到
+	// net.Conn.Read 返回时，再重新后去索取的 RequestCtx 实例。
+	fbr firstByteReader
 
+	// 存储因为处理请求超时，设置的响应体。
 	timeoutResponse *Response
-	timeoutCh       chan struct{}
-	timeoutTimer    *time.Timer
+	// 在请求处理函数结束后，即RequestHandler返回之后会向此通道发送struct{}来通知请求已经处理完毕了。
+	timeoutCh chan struct{}
+	// 超时计数器，在一个select中看 timeoutTimer.C 和 timeoutCh哪个通道现有数据到来。
+	timeoutTimer *time.Timer
 
-	hijackHandler    HijackHandler
+	// HijackHandler 处理函数
+	// 通过 Hijack 设置。
+	hijackHandler HijackHandler
+	// 不必发送Response中的响应。由HijackHandler函数完全负责。
 	hijackNoResponse bool
-	formValueFunc    FormValueFunc
+	SendF            bool
+	// 调用 FormValue 方法时获取数据的逻辑及顺序。
+	formValueFunc FormValueFunc
+}
+
+func (ctx *RequestCtx) SetConn(con net.Conn) {
+	ctx.c = con
 }
 
 // HijackHandler must process the hijacked connection c.
@@ -648,6 +828,9 @@ type HijackHandler func(c net.Conn)
 //   - HTTP/2.0 ( https://en.wikipedia.org/wiki/HTTP/2 )
 func (ctx *RequestCtx) Hijack(handler HijackHandler) {
 	ctx.hijackHandler = handler
+}
+func (ctx *RequestCtx) GetConn() net.Conn {
+	return ctx.c
 }
 
 // HijackSetNoResponse changes the behavior of hijacking a request.
@@ -825,9 +1008,17 @@ func (ctx *RequestCtx) reset() {
 	ctx.hijackNoResponse = false
 }
 
+// 当设置了 Server.ReduceMemoryUsage = true 时且才会用到
+// 此结构体。其目的是为了在读取下一个请求之前，释放RequestCtx上占有的资源
+// 因为等待下一个请求的时间不确定。
+// 靠一个字节大小的ch字段阻塞在net.Conn读上，就可以知道何时有响应到来。等到
+// net.Conn.Read 返回时，再重新后去索取的 RequestCtx 实例。
 type firstByteReader struct {
-	c        net.Conn
-	ch       byte
+	// 请求连接在Server.serveConn方法中设置也是这个函数的参数
+	c net.Conn
+	// 每轮http请求的第一个字节
+	ch byte
+	// ch是否已经被读取了
 	byteRead bool
 }
 
@@ -1562,6 +1753,22 @@ func (ctx *RequestCtx) TimeoutErrorWithCode(msg string, statusCode int) {
 //
 // Usage of this function is discouraged. Prefer eliminating ctx references
 // from pending goroutines instead of using this function.
+//
+// 如果RequestHandler返回之前，由其它协程保留了RequestCtx的引用。这是非常危险的，
+// 因为Server.serveCon在RequestHandler调用返回之后，开始操作ctx，主要是将写入的
+// 响应头和响应体发送到客户端。这样会与其它协程持有的ctx产生数据竞争。
+//
+// 通过在 RequestHandler返回之前调用 TimeoutErrorWithResponse 方法，将
+// 参数resp中的写入的内容(msg,code)复制到 timeoutResponse 字段上。
+//
+// 属主ctx不会被放回缓存池。在响应发送之前会通过检查ctx.timeoutResponse字段来进行以下处理：
+//
+//	timeoutResponse = ctx.timeoutResponse
+//		if timeoutResponse != nil {
+//			// Acquire a new ctx because the old one will still be in use by the timeout out handler.
+//			ctx = s.acquireCtx(c)
+//			timeoutResponse.CopyTo(&ctx.Response)
+//		}
 func (ctx *RequestCtx) TimeoutErrorWithResponse(resp *Response) {
 	respCopy := &Response{}
 	resp.CopyTo(respCopy)
@@ -2105,6 +2312,7 @@ func (s *Server) serveConnCleanup() {
 	atomic.AddUint32(&s.concurrency, ^uint32(0))
 }
 
+// #[[Server.serverConn]]
 func (s *Server) serveConn(c net.Conn) (err error) {
 	defer s.serveConnCleanup()
 	atomic.AddUint32(&s.concurrency, 1)
@@ -2414,8 +2622,10 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			if bw == nil {
 				bw = acquireWriter(ctx)
 			}
-			if err = writeResponse(ctx, bw); err != nil {
-				break
+			if !ctx.SendF {
+				if err = writeResponse(ctx, bw); err != nil {
+					break
+				}
 			}
 
 			// Only flush the writer if we don't have another request in the pipeline.
@@ -2892,10 +3102,22 @@ func (s *Server) trackConn(c net.Conn, state ConnState) {
 	s.idleConnsMu.Unlock()
 }
 
+// 关闭闲置net.Conn，即服务完一个http请求后，这个net.Conn便是闲置状态，
+// 直到从net.Conn读取一个字节后再再被设置为active并从idle队列中移除。
+//
+// 窗口期：客户端发送内容到将net.Conn从idle队列中移除设置为active状态。
+// 在这个阶段因为net.Conn依旧在idle列表中，但可能有数据在传输的，所以并
+// 不能做到平滑关闭。
+//
+// 对于一个连接最多会终止一个正在进行的http请求。
+//
+// ShutdownWithContext 会间隔一定的时间周期性的地调用此函数
+// 直到 Server.open 为0或者传入的Context参数关闭或取消。
 func (s *Server) closeIdleConns() {
 	s.idleConnsMu.Lock()
 	now := time.Now()
 	for c, t := range s.idleConns {
+		// 关闭在now之前加入idleConns的Conn。
 		if now.Sub(t) >= 0 {
 			_ = c.Close()
 			delete(s.idleConns, c)
