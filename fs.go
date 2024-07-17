@@ -427,6 +427,11 @@ func (fs *FS) NewRequestHandler() RequestHandler {
 	return fs.h
 }
 
+func (fs *FS) NewRequestHandlerWithError() RequestHandlerWithError {
+	fs.once.Do(fs.initRequestHandler)
+	return fs.hWithError
+}
+
 func (fs *FS) normalizeRoot(root string) string {
 	// fs.FS uses relative paths, that paths are slash-separated on all systems, even Windows.
 	if fs.FS == nil {
@@ -499,6 +504,7 @@ func (fs *FS) initRequestHandler() {
 	}
 
 	fs.h = h.handleRequest
+	fs.hWithError = h.handleRequestWithError
 }
 
 type fsHandler struct {
