@@ -1948,13 +1948,20 @@ func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.
 			return nil, io.EOF
 		}
 
-		if tc, ok := c.(*net.TCPConn); ok && s.TCPKeepalive {
-			if err := tc.SetKeepAlive(s.TCPKeepalive); err != nil {
-				_ = tc.Close()
-				return nil, err
-			}
-			if s.TCPKeepalivePeriod > 0 {
-				if err := tc.SetKeepAlivePeriod(s.TCPKeepalivePeriod); err != nil {
+		if tc, ok := c.(*net.TCPConn); ok {
+			if s.TCPKeepalive {
+				if err := tc.SetKeepAlive(s.TCPKeepalive); err != nil {
+					_ = tc.Close()
+					return nil, err
+				}
+				if s.TCPKeepalivePeriod > 0 {
+					if err := tc.SetKeepAlivePeriod(s.TCPKeepalivePeriod); err != nil {
+						_ = tc.Close()
+						return nil, err
+					}
+				}
+			} else {
+				if err := tc.SetKeepAlive(s.TCPKeepalive); err != nil {
 					_ = tc.Close()
 					return nil, err
 				}
