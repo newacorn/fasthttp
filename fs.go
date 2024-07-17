@@ -354,10 +354,13 @@ type FS struct {
 	// If CleanStop is set, the channel can be closed to stop the cleanup handlers
 	// for the FS RequestHandlers created with NewRequestHandler.
 	// NEVER close this channel while the handler is still being used!
-	CleanStop chan struct{}
+	CleanStop        chan struct{}
+	NeedCompressFunc func(path []byte) bool
 
-	once sync.Once
-	h    RequestHandler
+	once             sync.Once
+	h                RequestHandler
+	hWithError       RequestHandlerWithError
+	NeedCompressSize int64
 }
 
 // FSCompressedFileSuffix is the suffix FS adds to the original file names
@@ -456,6 +459,11 @@ func (fs *FS) normalizeRoot(root string) string {
 }
 
 func (fs *FS) initRequestHandler() {
+	// 如果 fs.FS 为空，fs.Root是相对路径或者fs.Root为空且fs.AllowEmptyRoot为false,
+	// fs.Root设置为当前目录+fs.Root。否则fs.Root不变。
+	//
+	//
+	// 但无论如何fs.normalizeRoot返回的root，其/都被替换为系统分隔符，并且末尾的分隔符都会被移除。
 	root := fs.normalizeRoot(fs.Root)
 
 	compressRoot := fs.CompressRoot
@@ -495,6 +503,8 @@ func (fs *FS) initRequestHandler() {
 		pathNotFound:           fs.PathNotFound,
 		acceptByteRange:        fs.AcceptByteRange,
 		compressedFileSuffixes: compressedFileSuffixes,
+		needCompressFunc:       fs.NeedCompressFunc,
+		needCompressSize:       fs.NeedCompressSize,
 	}
 
 	h.cacheManager = newCacheManager(fs)
@@ -508,7 +518,11 @@ func (fs *FS) initRequestHandler() {
 }
 
 type fsHandler struct {
-	filesystem             fs.FS
+	// filesystem 字段总是被设置，如果用户没有设置，则会被设置为 &osFS{}
+	filesystem fs.FS
+	// 如果 filesystem 字段不是 &osFS ,则在服务文件时不会使用 root 字段的值。
+	// 如果 root 不为空，则root末尾肯定不包括系统路径分隔符
+	// 服务文件： &osFS + (root + request.Path); filesystem + request.Path
 	root                   string
 	indexNames             []string
 	pathRewrite            PathRewriteFunc
@@ -523,6 +537,8 @@ type fsHandler struct {
 	cacheManager cacheManager
 
 	smallFileReaderPool sync.Pool
+	needCompressFunc    func(path []byte) bool
+	needCompressSize    int64
 }
 
 type fsFile struct {
@@ -1043,27 +1059,34 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	fileCacheKind := defaultCacheKind
 	fileEncoding := ""
 	byteRange := ctx.Request.Header.peek(strRange)
-	if len(byteRange) == 0 && h.compress {
-		switch {
-		case h.compressBrotli && ctx.Request.Header.HasAcceptEncodingBytes(strBr):
-			mustCompress = true
-			fileCacheKind = brotliCacheKind
-			fileEncoding = "br"
-		case ctx.Request.Header.HasAcceptEncodingBytes(strGzip):
-			mustCompress = true
-			fileCacheKind = gzipCacheKind
-			fileEncoding = "gzip"
-		case ctx.Request.Header.HasAcceptEncodingBytes(strZstd):
-			mustCompress = true
-			fileCacheKind = zstdCacheKind
-			fileEncoding = "zstd"
-		}
-	}
+	tryCompress := false
 
 	pathStr := string(path)
 
 	ff, ok := h.cacheManager.GetFileFromCache(fileCacheKind, pathStr)
 	if !ok {
+		if h.needCompressFunc != nil {
+			tryCompress = h.needCompressFunc(path)
+		} else {
+			tryCompress = h.compress
+		}
+		if len(byteRange) == 0 && tryCompress {
+			switch {
+			case h.compressBrotli && ctx.Request.Header.HasAcceptEncodingBytes(strBr):
+				mustCompress = true
+				fileCacheKind = brotliCacheKind
+				fileEncoding = "br"
+			case ctx.Request.Header.HasAcceptEncodingBytes(strGzip):
+				mustCompress = true
+				fileCacheKind = gzipCacheKind
+				fileEncoding = "gzip"
+			case ctx.Request.Header.HasAcceptEncodingBytes(strZstd):
+				mustCompress = true
+				fileCacheKind = zstdCacheKind
+				fileEncoding = "zstd"
+			}
+		}
+
 		filePath := h.pathToFilePath(pathStr)
 
 		var err error
@@ -1390,8 +1413,9 @@ func (h *fsHandler) compressAndOpenFSFile(filePath, fileEncoding string) (*fsFil
 	}
 
 	if strings.HasSuffix(filePath, h.compressedFileSuffixes[fileEncoding]) ||
-		fileInfo.Size() > fsMaxCompressibleFileSize ||
+		fileInfo.Size() > fsMaxCompressibleFileSize || fileInfo.Size() < h.needCompressSize ||
 		!isFileCompressible(f, fsMinCompressRatio) {
+
 		return h.newFSFile(f, fileInfo, false, filePath, "")
 	}
 
