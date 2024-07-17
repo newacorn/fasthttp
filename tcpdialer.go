@@ -162,6 +162,14 @@ type TCPDialer struct {
 	concurrencyCh chan struct{}
 
 	once sync.Once
+	// KeepAlive specifies the interval between keep-alive
+	// probes for an active network connection.
+	// If zero, keep-alive probes are sent with a default value
+	// (currently 15 seconds), if supported by the protocol and operating
+	// system. Network protocols or operating systems that do
+	// not support keep-alives ignore this field.
+	// If negative, keep-alive probes are disabled.
+	KeepAlive time.Duration
 }
 
 // Dial dials the given TCP addr using tcp4.
@@ -343,6 +351,7 @@ func (d *TCPDialer) tryDial(
 	if d.LocalAddr != nil {
 		dialer.LocalAddr = d.LocalAddr
 	}
+	dialer.KeepAlive = d.KeepAlive
 
 	ctx, cancelCtx := context.WithDeadline(context.Background(), deadline)
 	defer cancelCtx()
