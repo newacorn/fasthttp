@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	pool "github.com/newacorn/bytes-pool"
 	"io"
 	"sync"
 	"sync/atomic"
@@ -2454,6 +2455,7 @@ func (h *ResponseHeader) appendStatusLine(dst []byte) []byte {
 // AppendBytes appends response header representation to dst and returns
 // the extended dst.
 func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
+	defer func() { h.RecycleItems() }()
 	dst = h.appendStatusLine(dst[:0])
 
 	server := h.Server()
