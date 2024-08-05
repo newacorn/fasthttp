@@ -2256,11 +2256,13 @@ func readBodyWithStreaming(r *bufio.Reader, contentLength int, maxBodySize int, 
 		readN = 8 * 1024
 	}
 
-	if contentLength >= 0 && maxBodySize >= contentLength {
-		b, err = appendBodyFixedSize(r, dst, readN)
-	} else {
-		b, err = readBodyIdentity(r, readN, dst)
-	}
+	/**
+	We cannot use the readBodyIdentity function here because its pre-reading
+	feature might read beyond the necessary content, affecting parts of br
+	that do not belong to this request. It is acceptable to use a different logic in this situation.
+	same time fix issue: https://github.com/valyala/fasthttp/issues/1816
+	*/
+	b, err = appendBodyFixedSize(r, dst, readN)
 
 	if err != nil {
 		return b, err
