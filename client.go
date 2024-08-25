@@ -1365,9 +1365,7 @@ func (c *HostClient) do(req *Request, resp *Response) (bool, error) {
 		defer ReleaseResponse(resp)
 	}
 
-	ok, err := c.doNonNilReqResp(req, resp)
-
-	return ok, err
+	return c.doNonNilReqResp(req, resp)
 }
 
 func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error) {
@@ -1552,6 +1550,7 @@ func (c *HostClient) acquireConn(reqTimeout time.Duration, connectionClose bool)
 		case <-w.ready:
 			return w.conn, w.err
 		case <-tc.C:
+			c.connsWait.failedWaiters.Add(1)
 			if timeoutOverridden {
 				return nil, ErrTimeout
 			}
@@ -1697,6 +1696,7 @@ func (c *HostClient) decConnsCount() {
 				dialed = true
 				break
 			}
+			c.connsWait.failedWaiters.Add(-1)
 		}
 	}
 	if !dialed {
@@ -1749,8 +1749,19 @@ func (c *HostClient) releaseConn(cc *clientConn) {
 			w := q.popFront()
 			if w.waiting() {
 				delivered = w.tryDeliver(cc, nil)
-				break
+				// This is the last resort to hand over conCount sema.
+				// We must ensure that there are no valid waiters in connsWait
+				// when we exit this loop.
+				//
+				// We did not apply the same looping pattern in the decConnsCount
+				// method because it needs to create a new time-spent connection,
+				// and the decConnsCount call chain will inevitably reach this point.
+				// When MaxConnWaitTimeout>0.
+				if delivered {
+					break
+				}
 			}
+			c.connsWait.failedWaiters.Add(-1)
 		}
 	}
 	if !delivered {
@@ -2106,11 +2117,17 @@ type wantConnQueue struct {
 	head    []*wantConn
 	tail    []*wantConn
 	headPos int
+	// failedWaiters is the number of waiters in the head or tail queue,
+	// but is invalid.
+	// These state waiters cannot truly be considered as waiters; the current
+	// implementation does not immediately remove them when they become
+	// invalid but instead only marks them.
+	failedWaiters atomic.Int64
 }
 
 // len returns the number of items in the queue.
 func (q *wantConnQueue) len() int {
-	return len(q.head) - q.headPos + len(q.tail)
+	return len(q.head) - q.headPos + len(q.tail) - int(q.failedWaiters.Load())
 }
 
 // pushBack adds w to the back of the queue.
@@ -2154,6 +2171,7 @@ func (q *wantConnQueue) clearFront() (cleaned bool) {
 			return cleaned
 		}
 		q.popFront()
+		q.failedWaiters.Add(-1)
 		cleaned = true
 	}
 }
