@@ -2662,9 +2662,11 @@ func testClientGetTimeoutSuccess(t *testing.T, c *Client, addr string, n int) {
 		buf = body
 		if err != nil {
 			t.Errorf("unexpected error when doing http request: %v", err)
+			return
 		}
 		if statusCode != StatusOK {
 			t.Errorf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
+			return
 		}
 		resultURI := string(body)
 		if strings.HasPrefix(uri, "https") {
