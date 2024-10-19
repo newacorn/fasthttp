@@ -59,7 +59,7 @@ func testIssue6RequestHeaderSetContentType(t *testing.T, method string) {
 	h.SetMethod(method)
 	h.SetRequestURI("http://localhost/test")
 	h.SetContentType(contentType)
-	h.SetContentLength(contentLength)
+	h.SetContentLength(int64(contentLength))
 
 	issue6VerifyRequestHeader(t, &h, contentType, contentLength, method)
 
@@ -81,7 +81,7 @@ func issue6VerifyRequestHeader(t *testing.T, h *RequestHeader, contentType strin
 	if string(h.Method()) != method {
 		t.Fatalf("unexpected method: %q. Expecting %q", h.Method(), method)
 	}
-	if h.ContentLength() != contentLength {
+	if h.ContentLength() != int64(contentLength) {
 		t.Fatalf("unexpected content-length: %d. Expecting %d. method=%q", h.ContentLength(), contentLength, method)
 	}
 }

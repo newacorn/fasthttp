@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/valyala/fasthttp"
+	"github.com/newacorn/fasthttp"
 )
 
 func ExampleLBClient() {
@@ -18,9 +18,9 @@ func ExampleLBClient() {
 	// Prepare clients for each server
 	var lbc fasthttp.LBClient
 	for _, addr := range servers {
-		c := &fasthttp.HostClient{
-			Addr: addr,
-		}
+		c, _ := fasthttp.NewHostClient(fasthttp.Config{
+			Addrs: []string{addr},
+		})
 		lbc.Clients = append(lbc.Clients, c)
 	}
 

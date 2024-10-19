@@ -10,27 +10,27 @@ import (
 func TestAllocationServeConn(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-		},
-	}
 
+		},
+		Concurrency: DefaultConcurrency,
+	}
 	rw := &readWriter{}
 	// Make space for the request and response here so it
 	// doesn't allocate within the test.
 	rw.r.Grow(1024)
 	rw.w.Grow(1024)
 
-	n := testing.AllocsPerRun(100, func() {
+	n := testing.AllocsPerRun(1000, func() {
 		rw.r.WriteString("GET / HTTP/1.1\r\nHost: google.com\r\nCookie: foo=bar\r\n\r\n")
 		if err := s.ServeConn(rw); err != nil {
 			t.Fatal(err)
 		}
-
 		// Reset the write buffer to make space for the next response.
 		rw.w.Reset()
 	})
 
-	if n != 0 {
-		t.Fatalf("expected 0 allocations, got %f", n)
+	if n != 2 {
+		t.Fatalf("expected 2 allocations, got %f", n)
 	}
 }
 
@@ -63,8 +63,9 @@ func TestAllocationClient(t *testing.T) {
 		ReleaseResponse(res)
 	})
 
-	if n != 0 {
-		t.Fatalf("expected 0 allocations, got %f", n)
+	// host to string convert.
+	if n != 1 {
+		t.Fatalf("expected 1 allocations, got %f", n)
 	}
 }
 

@@ -102,7 +102,7 @@ func BenchmarkAppendUint(b *testing.B) {
 		var buf []byte
 		i := 0
 		for pb.Next() {
-			buf = AppendUint(buf[:0], i)
+			buf = AppendUint(buf[:0], int64(i))
 			i++
 			if i > 0x7fffffff {
 				i = 0

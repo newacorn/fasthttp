@@ -6,8 +6,6 @@ import (
 	"io"
 	"sort"
 	"sync"
-
-	"github.com/valyala/bytebufferpool"
 )
 
 const (
@@ -285,7 +283,7 @@ func (a *Args) HasBytes(key []byte) bool {
 var ErrNoArgValue = errors.New("no Args value for the given key")
 
 // GetUint returns uint value for the given key.
-func (a *Args) GetUint(key string) (int, error) {
+func (a *Args) GetUint(key string) (int64, error) {
 	value := a.Peek(key)
 	if len(value) == 0 {
 		return -1, ErrNoArgValue
@@ -295,10 +293,9 @@ func (a *Args) GetUint(key string) (int, error) {
 
 // SetUint sets uint value for the given key.
 func (a *Args) SetUint(key string, value int) {
-	bb := bytebufferpool.Get()
-	bb.B = AppendUint(bb.B[:0], value)
-	a.SetBytesV(key, bb.B)
-	bytebufferpool.Put(bb)
+	dst := make([]byte, 20)
+	dst = AppendUintInto(dst, value)
+	a.SetBytesV(key, dst)
 }
 
 // SetUintBytes sets uint value for the given key.
@@ -309,7 +306,7 @@ func (a *Args) SetUintBytes(key []byte, value int) {
 // GetUintOrZero returns uint value for the given key.
 //
 // Zero (0) is returned on error.
-func (a *Args) GetUintOrZero(key string) int {
+func (a *Args) GetUintOrZero(key string) int64 {
 	n, err := a.GetUint(key)
 	if err != nil {
 		n = 0

@@ -54,12 +54,14 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 		sk := b2s(k)
 		sv := b2s(v)
 
-		switch sk {
-		case "Transfer-Encoding":
+		if sk == fasthttp.HeaderTransferEncoding {
 			r.TransferEncoding = append(r.TransferEncoding, sv)
-		default:
-			r.Header.Set(sk, sv)
+			return
 		}
+		if sk == fasthttp.HeaderCookie {
+			sv = string(v)
+		}
+		r.Header.Set(sk, sv)
 	})
 
 	return nil

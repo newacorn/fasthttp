@@ -3,12 +3,14 @@ package fasthttp
 // Headers.
 const (
 	// Authentication.
+
 	HeaderAuthorization      = "Authorization"
 	HeaderProxyAuthenticate  = "Proxy-Authenticate"
 	HeaderProxyAuthorization = "Proxy-Authorization"
 	HeaderWWWAuthenticate    = "WWW-Authenticate"
 
 	// Caching.
+
 	HeaderAge           = "Age"
 	HeaderCacheControl  = "Cache-Control"
 	HeaderClearSiteData = "Clear-Site-Data"
@@ -17,6 +19,7 @@ const (
 	HeaderWarning       = "Warning"
 
 	// Client hints.
+
 	HeaderAcceptCH         = "Accept-CH"
 	HeaderAcceptCHLifetime = "Accept-CH-Lifetime"
 	HeaderContentDPR       = "Content-DPR"
@@ -27,6 +30,7 @@ const (
 	HeaderWidth            = "Width"
 
 	// Conditionals.
+
 	HeaderETag              = "ETag"
 	HeaderIfMatch           = "If-Match"
 	HeaderIfModifiedSince   = "If-Modified-Since"
@@ -36,23 +40,27 @@ const (
 	HeaderVary              = "Vary"
 
 	// Connection management.
+
 	HeaderConnection      = "Connection"
 	HeaderKeepAlive       = "Keep-Alive"
 	HeaderProxyConnection = "Proxy-Connection"
 
 	// Content negotiation.
+
 	HeaderAccept         = "Accept"
 	HeaderAcceptCharset  = "Accept-Charset"
 	HeaderAcceptEncoding = "Accept-Encoding"
 	HeaderAcceptLanguage = "Accept-Language"
 
 	// Controls.
+
 	HeaderCookie      = "Cookie"
 	HeaderExpect      = "Expect"
 	HeaderMaxForwards = "Max-Forwards"
 	HeaderSetCookie   = "Set-Cookie"
 
 	// CORS.
+
 	HeaderAccessControlAllowCredentials = "Access-Control-Allow-Credentials"
 	HeaderAccessControlAllowHeaders     = "Access-Control-Allow-Headers"
 	HeaderAccessControlAllowMethods     = "Access-Control-Allow-Methods"
@@ -66,13 +74,16 @@ const (
 	HeaderXPermittedCrossDomainPolicies = "X-Permitted-Cross-Domain-Policies"
 
 	// Do Not Track.
+
 	HeaderDNT = "DNT"
 	HeaderTk  = "Tk"
 
 	// Downloads.
+
 	HeaderContentDisposition = "Content-Disposition"
 
 	// Message body information.
+
 	HeaderContentEncoding = "Content-Encoding"
 	HeaderContentLanguage = "Content-Language"
 	HeaderContentLength   = "Content-Length"
@@ -80,6 +91,7 @@ const (
 	HeaderContentType     = "Content-Type"
 
 	// Proxies.
+
 	HeaderForwarded       = "Forwarded"
 	HeaderVia             = "Via"
 	HeaderXForwardedFor   = "X-Forwarded-For"
@@ -87,9 +99,11 @@ const (
 	HeaderXForwardedProto = "X-Forwarded-Proto"
 
 	// Redirects.
+
 	HeaderLocation = "Location"
 
 	// Request context.
+
 	HeaderFrom           = "From"
 	HeaderHost           = "Host"
 	HeaderReferer        = "Referer"
@@ -97,16 +111,19 @@ const (
 	HeaderUserAgent      = "User-Agent"
 
 	// Response context.
+
 	HeaderAllow  = "Allow"
 	HeaderServer = "Server"
 
 	// Range requests.
+
 	HeaderAcceptRanges = "Accept-Ranges"
 	HeaderContentRange = "Content-Range"
 	HeaderIfRange      = "If-Range"
 	HeaderRange        = "Range"
 
 	// Security.
+
 	HeaderContentSecurityPolicy           = "Content-Security-Policy"
 	HeaderContentSecurityPolicyReportOnly = "Content-Security-Policy-Report-Only"
 	HeaderCrossOriginResourcePolicy       = "Cross-Origin-Resource-Policy"
@@ -123,6 +140,7 @@ const (
 	HeaderXXSSProtection                  = "X-XSS-Protection"
 
 	// Server-sent event.
+
 	HeaderLastEventID = "Last-Event-ID"
 	HeaderNEL         = "NEL"
 	HeaderPingFrom    = "Ping-From"
@@ -130,11 +148,13 @@ const (
 	HeaderReportTo    = "Report-To"
 
 	// Transfer coding.
+
 	HeaderTE               = "TE"
 	HeaderTrailer          = "Trailer"
 	HeaderTransferEncoding = "Transfer-Encoding"
 
 	// WebSockets.
+
 	HeaderSecWebSocketAccept     = "Sec-WebSocket-Accept"
 	HeaderSecWebSocketExtensions = "Sec-WebSocket-Extensions" /* #nosec G101 */
 	HeaderSecWebSocketKey        = "Sec-WebSocket-Key"
@@ -142,6 +162,7 @@ const (
 	HeaderSecWebSocketVersion    = "Sec-WebSocket-Version"
 
 	// Other.
+
 	HeaderAcceptPatch         = "Accept-Patch"
 	HeaderAcceptPushPolicy    = "Accept-Push-Policy"
 	HeaderAcceptSignature     = "Accept-Signature"
@@ -162,4 +183,7 @@ const (
 	HeaderXRequestedWith      = "X-Requested-With"
 	HeaderXRobotsTag          = "X-Robots-Tag"
 	HeaderXUACompatible       = "X-UA-Compatible"
+
+	CharsetUTF8 = "UTF-8"
+	CharsetGBK  = "GBK"
 )

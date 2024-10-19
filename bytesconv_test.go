@@ -125,7 +125,7 @@ func testAppendIPv4(t *testing.T, ipStr string, isValid bool) {
 
 func testAppendUint(t *testing.T, n int) {
 	expectedS := strconv.Itoa(n)
-	s := AppendUint(nil, n)
+	s := AppendUint(nil, int64(n))
 	if string(s) != expectedS {
 		t.Fatalf("unexpected uint %q. Expecting %q. n=%d", s, expectedS, n)
 	}
@@ -304,7 +304,7 @@ func testParseUintSuccess(t *testing.T, s string, expectedN int) {
 	if err != nil {
 		t.Fatalf("Unexpected error when parsing %q: %v", s, err)
 	}
-	if n != expectedN {
+	if n != int64(expectedN) {
 		t.Fatalf("Unexpected value %d. Expected %d. num=%q", n, expectedN, s)
 	}
 }

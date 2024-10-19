@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"utils"
 )
 
 // AcquireURI returns an empty URI instance from the pool.
@@ -203,6 +204,23 @@ func (u *URI) Scheme() []byte {
 		scheme = strHTTP
 	}
 	return scheme
+}
+
+// Hostname returns u.Host, stripping any valid port number if present.
+//
+// If the result is enclosed in square brackets, as literal IPv6 addresses are,
+// the square brackets are removed from the result.
+func (u *URI) Hostname() string {
+	host, _ := utils.SplitHostAndPortStd(b2s(u.host))
+	return host
+}
+
+// Port returns the port part of u.Host, without the leading colon.
+//
+// If u.Host doesn't contain a valid numeric port, Port returns an empty string.
+func (u *URI) Port() string {
+	_, port := utils.SplitHostAndPortStd(b2s(u.host))
+	return port
 }
 
 // SetScheme sets URI scheme, i.e. http, https, ftp, etc.
@@ -536,21 +554,27 @@ func shouldEscape(c byte, mode encoding) bool {
 }
 
 func ishex(c byte) bool {
-	return ('0' <= c && c <= '9') ||
-		('a' <= c && c <= 'f') ||
-		('A' <= c && c <= 'F')
+	return hex2intTable[c] < 16
+	/*
+		return ('0' <= c && c <= '9') ||
+			('a' <= c && c <= 'f') ||
+			('A' <= c && c <= 'F')
+	*/
 }
 
 func unhex(c byte) byte {
-	switch {
-	case '0' <= c && c <= '9':
-		return c - '0'
-	case 'a' <= c && c <= 'f':
-		return c - 'a' + 10
-	case 'A' <= c && c <= 'F':
-		return c - 'A' + 10
-	}
-	return 0
+	return hex2intTable[c] & 15
+	/*
+		switch {
+		case '0' <= c && c <= '9':
+			return c - '0'
+		case 'a' <= c && c <= 'f':
+			return c - 'a' + 10
+		case 'A' <= c && c <= 'F':
+			return c - 'A' + 10
+		}
+		return 0
+	*/
 }
 
 // validOptionalPort reports whether port is either an empty string

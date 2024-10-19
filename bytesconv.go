@@ -10,7 +10,6 @@ import (
 	"io"
 	"math"
 	"net"
-	"sync"
 	"time"
 )
 
@@ -58,10 +57,10 @@ func AppendIPv4(dst []byte, ip net.IP) []byte {
 		return append(dst, "non-v4 ip passed to AppendIPv4"...)
 	}
 
-	dst = AppendUint(dst, int(ip[0]))
+	dst = AppendUint(dst, int64(ip[0]))
 	for i := 1; i < 4; i++ {
 		dst = append(dst, '.')
-		dst = AppendUint(dst, int(ip[i]))
+		dst = AppendUint(dst, int64(ip[i]))
 	}
 	return dst
 }
@@ -121,7 +120,7 @@ func ParseHTTPDate(date []byte) (time.Time, error) {
 }
 
 // AppendUint appends n to dst and returns the extended dst.
-func AppendUint(dst []byte, n int) []byte {
+func AppendUint(dst []byte, n int64) []byte {
 	if n < 0 {
 		// developer sanity-check
 		panic("BUG: int must be positive")
@@ -130,7 +129,7 @@ func AppendUint(dst []byte, n int) []byte {
 	var b [20]byte
 	buf := b[:]
 	i := len(buf)
-	var q int
+	var q int64
 	for n >= 10 {
 		i--
 		q = n / 10
@@ -145,7 +144,7 @@ func AppendUint(dst []byte, n int) []byte {
 }
 
 // ParseUint parses uint from buf.
-func ParseUint(buf []byte) (int, error) {
+func ParseUint(buf []byte) (int64, error) {
 	v, n, err := parseUintBuf(buf)
 	if n != len(buf) {
 		return -1, errUnexpectedTrailingChar
@@ -160,12 +159,12 @@ var (
 	errTooLongInt             = errors.New("too long int")
 )
 
-func parseUintBuf(b []byte) (int, int, error) {
+func parseUintBuf(b []byte) (int64, int, error) {
 	n := len(b)
 	if n == 0 {
 		return -1, 0, errEmptyInt
 	}
-	v := 0
+	var v int64
 	for i := 0; i < n; i++ {
 		c := b[i]
 		k := c - '0'
@@ -175,7 +174,7 @@ func parseUintBuf(b []byte) (int, int, error) {
 			}
 			return v, i, nil
 		}
-		vNew := 10*v + int(k)
+		vNew := 10*v + int64(k)
 		// Test for overflow.
 		if vNew < v {
 			return -1, i, errTooLongInt
@@ -200,7 +199,7 @@ func ParseUfloat(buf []byte) (float64, error) {
 	}
 	b := buf
 	var v uint64
-	offset := 1.0
+	offset := 0
 	var pointFound bool
 	for i, c := range b {
 		if c < '0' || c > '9' {
@@ -226,20 +225,21 @@ func ParseUfloat(buf []byte) (float64, error) {
 				default:
 					minus = 1
 				}
-				vv, err := ParseUint(b)
+				vv2, err := ParseUint(b)
+				vv := int(vv2)
 				if err != nil {
 					return -1, errInvalidFloatExponent
 				}
-				return float64(v) * offset * math.Pow10(minus*vv), nil
+				return float64(v) * math.Pow10(minus*vv+offset), nil
 			}
 			return -1, errUnexpectedFloatChar
 		}
 		v = 10*v + uint64(c-'0')
 		if pointFound {
-			offset /= 10
+			offset--
 		}
 	}
-	return float64(v) * offset, nil
+	return float64(v) * math.Pow10(offset), nil
 }
 
 var (
@@ -275,19 +275,14 @@ func readHexInt(r *bufio.Reader) (int, error) {
 	}
 }
 
-var hexIntBufPool sync.Pool
-
 func writeHexInt(w *bufio.Writer, n int) error {
 	if n < 0 {
 		// developer sanity-check
 		panic("BUG: int must be positive")
 	}
 
-	v := hexIntBufPool.Get()
-	if v == nil {
-		v = make([]byte, maxHexIntChars+1)
-	}
-	buf := v.([]byte)
+	var b [16]byte
+	buf := b[:]
 	i := len(buf) - 1
 	for {
 		buf[i] = lowerhex[n&0xf]
@@ -298,7 +293,6 @@ func writeHexInt(w *bufio.Writer, n int) error {
 		i--
 	}
 	_, err := w.Write(buf[i:])
-	hexIntBufPool.Put(v)
 	return err
 }
 

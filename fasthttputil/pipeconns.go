@@ -140,6 +140,11 @@ func (c *pipeConn) Write(p []byte) (int, error) {
 
 	return len(p), nil
 }
+func (c *pipeConn) ReadByte() (byte, error) {
+	var p [1]byte
+	_, err := c.Read(p[:])
+	return p[0], err
+}
 
 func (c *pipeConn) Read(p []byte) (int, error) {
 	mayBlock := true
@@ -337,7 +342,7 @@ func releaseByteBuffer(b *byteBuffer) {
 var byteBufferPool = &sync.Pool{
 	New: func() any {
 		return &byteBuffer{
-			b: make([]byte, 1024),
+			b: make([]byte, 8192*2),
 		}
 	},
 }

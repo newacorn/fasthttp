@@ -11,6 +11,11 @@ import (
 	"time"
 )
 
+const (
+	TCP4 = "tcp4"
+	TCP  = "tcp"
+)
+
 // Dial dials the given TCP addr using tcp4.
 //
 // This function has the following additional features comparing to net.Dial:
@@ -35,7 +40,7 @@ import (
 //   - foo.bar:80
 //   - aaa.com:8080
 func Dial(addr string) (net.Conn, error) {
-	return defaultDialer.Dial(addr)
+	return defaultDialer.DialTimeout(TCP4, addr, DefaultDialTimeout)
 }
 
 // DialTimeout dials the given TCP addr using tcp4 using the given timeout.
@@ -60,7 +65,7 @@ func Dial(addr string) (net.Conn, error) {
 //   - foo.bar:80
 //   - aaa.com:8080
 func DialTimeout(addr string, timeout time.Duration) (net.Conn, error) {
-	return defaultDialer.DialTimeout(addr, timeout)
+	return defaultDialer.DialTimeout(TCP4, addr, timeout)
 }
 
 // DialDualStack dials the given TCP addr using both tcp4 and tcp6.
@@ -88,7 +93,7 @@ func DialTimeout(addr string, timeout time.Duration) (net.Conn, error) {
 //   - foo.bar:80
 //   - aaa.com:8080
 func DialDualStack(addr string) (net.Conn, error) {
-	return defaultDialer.DialDualStack(addr)
+	return defaultDialer.DialTimeout(TCP, addr, DefaultDialTimeout)
 }
 
 // DialDualStackTimeout dials the given TCP addr using both tcp4 and tcp6
@@ -114,10 +119,11 @@ func DialDualStack(addr string) (net.Conn, error) {
 //   - foo.bar:80
 //   - aaa.com:8080
 func DialDualStackTimeout(addr string, timeout time.Duration) (net.Conn, error) {
-	return defaultDialer.DialDualStackTimeout(addr, timeout)
+	return defaultDialer.DialTimeout(TCP, addr, timeout)
 }
 
 var defaultDialer = &TCPDialer{Concurrency: 1000}
+var defaultDialerKeepAlive = &TCPDialer{Concurrency: 1000, TCPKeepalive: true}
 
 // Resolver represents interface of the tcp resolver.
 type Resolver interface {
@@ -155,22 +161,24 @@ type TCPDialer struct {
 	// DNSCacheDuration may be used to override the default DNS cache duration (DefaultDNSCacheDuration)
 	DNSCacheDuration time.Duration
 
+	// Period between tcp keep-alive messages.
+	//
+	// TCP keep-alive period is determined by operation system by default.
+	TCPKeepalivePeriod time.Duration
+
 	tcpAddrsMap sync.Map
 
 	concurrencyCh chan struct{}
 
+	once sync.Once
 	// DisableDNSResolution may be used to disable DNS resolution
 	DisableDNSResolution bool
-
-	once sync.Once
-	// KeepAlive specifies the interval between keep-alive
-	// probes for an active network connection.
-	// If zero, keep-alive probes are sent with a default value
-	// (currently 15 seconds), if supported by the protocol and operating
-	// system. Network protocols or operating systems that do
-	// not support keep-alives ignore this field.
-	// If negative, keep-alive probes are disabled.
-	KeepAlive time.Duration
+	// Whether to enable tcp keep-alive connections.
+	//
+	// Whether the operating system should send tcp keep-alive messages on the tcp connection.
+	//
+	// By default tcp keep-alive connections are disabled.
+	TCPKeepalive bool
 }
 
 // Dial dials the given TCP addr using tcp4.
@@ -196,6 +204,8 @@ type TCPDialer struct {
 //   - foobar.baz:443
 //   - foo.bar:80
 //   - aaa.com:8080
+//
+// ** This function only uses IPv4 dialing with a default timeout of 3 seconds.
 func (d *TCPDialer) Dial(addr string) (net.Conn, error) {
 	return d.dial(addr, false, DefaultDialTimeout)
 }
@@ -221,8 +231,25 @@ func (d *TCPDialer) Dial(addr string) (net.Conn, error) {
 //   - foobar.baz:443
 //   - foo.bar:80
 //   - aaa.com:8080
-func (d *TCPDialer) DialTimeout(addr string, timeout time.Duration) (net.Conn, error) {
-	return d.dial(addr, false, timeout)
+//
+// ** The network parameter only supports tcp and tcp4. A timeout parameter less than 0
+// ** means no timeout is used, while greater than 0 indicates the use of a default timeout of 3 seconds.
+func (d *TCPDialer) DialTimeout(network, addr string, timeout time.Duration) (conn net.Conn, err error) {
+	if timeout == 0 {
+		timeout = DefaultDialTimeout
+	} else if timeout < 0 {
+		timeout = 0
+	}
+	var dualStack bool
+	switch network {
+	case "tcp4":
+	case "tcp":
+		dualStack = true
+	default:
+		err = errors.New("dont support the network: " + network)
+		return
+	}
+	return d.dial(addr, dualStack, timeout)
 }
 
 // DialDualStack dials the given TCP addr using both tcp4 and tcp6.
@@ -249,6 +276,8 @@ func (d *TCPDialer) DialTimeout(addr string, timeout time.Duration) (net.Conn, e
 //   - foobar.baz:443
 //   - foo.bar:80
 //   - aaa.com:8080
+//
+// ** Dial using TCP with a default timeout of 3 seconds.
 func (d *TCPDialer) DialDualStack(addr string) (net.Conn, error) {
 	return d.dial(addr, true, DefaultDialTimeout)
 }
@@ -275,8 +304,10 @@ func (d *TCPDialer) DialDualStack(addr string) (net.Conn, error) {
 //   - foobar.baz:443
 //   - foo.bar:80
 //   - aaa.com:8080
+//
+// ** Dial using TCP with a specified timeout.
 func (d *TCPDialer) DialDualStackTimeout(addr string, timeout time.Duration) (net.Conn, error) {
-	return d.dial(addr, true, timeout)
+	return d.DialTimeout("tcp", addr, timeout)
 }
 
 func (d *TCPDialer) dial(addr string, dualStack bool, timeout time.Duration) (net.Conn, error) {
@@ -293,7 +324,10 @@ func (d *TCPDialer) dial(addr string, dualStack bool, timeout time.Duration) (ne
 			go d.tcpAddrsClean()
 		}
 	})
-	deadline := time.Now().Add(timeout)
+	var deadline = time.Time{}
+	if timeout != 0 {
+		deadline = time.Now().Add(timeout)
+	}
 	network := "tcp4"
 	if dualStack {
 		network = "tcp"
@@ -324,6 +358,9 @@ func (d *TCPDialer) dial(addr string, dualStack bool, timeout time.Duration) (ne
 func (d *TCPDialer) tryDial(
 	network string, addr string, deadline time.Time, concurrencyCh chan struct{},
 ) (net.Conn, error) {
+	if deadline.IsZero() {
+		return d.tryDialWithoutDeadline(network, addr, concurrencyCh)
+	}
 	timeout := time.Until(deadline)
 	if timeout <= 0 {
 		return nil, wrapDialWithUpstream(ErrDialTimeout, addr)
@@ -352,7 +389,11 @@ func (d *TCPDialer) tryDial(
 	if d.LocalAddr != nil {
 		dialer.LocalAddr = d.LocalAddr
 	}
-	dialer.KeepAlive = d.KeepAlive
+	if !d.TCPKeepalive {
+		dialer.KeepAlive = -1
+	} else {
+		dialer.KeepAlive = d.TCPKeepalivePeriod
+	}
 
 	ctx, cancelCtx := context.WithDeadline(context.Background(), deadline)
 	defer cancelCtx()
@@ -477,8 +518,12 @@ func resolveTCPAddrs(addr string, dualStack bool, resolver Resolver, deadline ti
 		resolver = net.DefaultResolver
 	}
 
-	ctx, cancel := context.WithDeadline(context.Background(), deadline)
-	defer cancel()
+	ctx := context.Background()
+	if !deadline.IsZero() {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(context.Background(), deadline)
+		defer cancel()
+	}
 	ipaddrs, err := resolver.LookupIPAddr(ctx, host)
 	if err != nil {
 		return nil, err
@@ -504,3 +549,30 @@ func resolveTCPAddrs(addr string, dualStack bool, resolver Resolver, deadline ti
 }
 
 var errNoDNSEntries = errors.New("couldn't find DNS entries for the given domain. Try using DialDualStack")
+
+func (d *TCPDialer) tryDialWithoutDeadline(
+	network string, addr string, concurrencyCh chan struct{},
+) (net.Conn, error) {
+	if concurrencyCh != nil {
+		concurrencyCh <- struct{}{}
+	}
+
+	dialer := net.Dialer{}
+	if d.LocalAddr != nil {
+		dialer.LocalAddr = d.LocalAddr
+	}
+	if !d.TCPKeepalive {
+		dialer.KeepAlive = -1
+	} else {
+		dialer.KeepAlive = d.TCPKeepalivePeriod
+	}
+
+	conn, err := dialer.DialContext(context.Background(), network, addr)
+	if concurrencyCh != nil {
+		<-concurrencyCh
+	}
+	if err != nil {
+		return nil, wrapDialWithUpstream(err, addr)
+	}
+	return conn, nil
+}

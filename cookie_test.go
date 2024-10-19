@@ -58,13 +58,13 @@ func TestCookieSecureHttpOnly(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !c.Secure() {
-		t.Fatalf("secure must be set")
+		t.Fatalf("Secure must be set")
 	}
 	if !c.HTTPOnly() {
 		t.Fatalf("HttpOnly must be set")
 	}
 	s := c.String()
-	if !strings.Contains(s, "; secure") {
+	if !strings.Contains(s, "; Secure") {
 		t.Fatalf("missing secure flag in cookie %q", s)
 	}
 	if !strings.Contains(s, "; HttpOnly") {
@@ -84,7 +84,7 @@ func TestCookieSecure(t *testing.T) {
 		t.Fatalf("secure must be set")
 	}
 	s := c.String()
-	if !strings.Contains(s, "; secure") {
+	if !strings.Contains(s, "; Secure") {
 		t.Fatalf("missing secure flag in cookie %q", s)
 	}
 
@@ -157,7 +157,7 @@ func TestCookieSameSite(t *testing.T) {
 	if !strings.Contains(s, "; SameSite=None") {
 		t.Fatalf("missing SameSite flag in cookie %q", s)
 	}
-	if !strings.Contains(s, "; secure") {
+	if !strings.Contains(s, "; Secure") {
 		t.Fatalf("missing Secure flag in cookie %q", s)
 	}
 
@@ -186,7 +186,7 @@ func TestCookieMaxAge(t *testing.T) {
 		t.Fatalf("max-age must be set")
 	}
 	s := c.String()
-	if !strings.Contains(s, "; max-age=100") {
+	if !strings.Contains(s, "; Max-Age=100") {
 		t.Fatalf("missing max-age flag in cookie %q", s)
 	}
 
@@ -197,20 +197,20 @@ func TestCookieMaxAge(t *testing.T) {
 		t.Fatalf("max-age ignored")
 	}
 	s = c.String()
-	if s != "foo=bar; max-age=100" {
+	if s != "foo=bar; Max-Age=100; Expires=Tue, 10 Nov 2009 23:00:00 GMT" {
 		t.Fatalf("missing max-age in cookie %q", s)
 	}
 
 	expires := time.Unix(100, 0)
 	c.SetExpire(expires)
 	s = c.String()
-	if s != "foo=bar; max-age=100" {
-		t.Fatalf("expires should be ignored due to max-age: %q", s)
+	if s != "foo=bar; Max-Age=100; Expires=Thu, 01 Jan 1970 00:01:40 GMT" {
+		t.Fatalf("expect: %q", "foo=bar;  Max-Age=100; Expires=Thu, 01 Jan 1970 00:01:40 GMT")
 	}
 
 	c.SetMaxAge(0)
 	s = c.String()
-	if s != "foo=bar; expires=Thu, 01 Jan 1970 00:01:40 GMT" {
+	if s != "foo=bar; Expires=Thu, 01 Jan 1970 00:01:40 GMT" {
 		t.Fatalf("missing expires %q", s)
 	}
 }
@@ -263,7 +263,7 @@ func TestCookiePartitioned(t *testing.T) {
 		t.Fatalf("secure must be set")
 	}
 	s = c.String()
-	if !strings.Contains(s, "; secure") {
+	if !strings.Contains(s, "; Secure") {
 		t.Fatalf("missing secure flag in cookie %q", s)
 	}
 
@@ -342,10 +342,10 @@ func TestCookieParse(t *testing.T) {
 	testCookieParse(t, "foo=", "foo=")
 	testCookieParse(t, `foo="bar"`, "foo=bar")
 	testCookieParse(t, `"foo"=bar`, `"foo"=bar`)
-	testCookieParse(t, "foo=bar; Domain=aaa.com; PATH=/foo/bar", "foo=bar; domain=aaa.com; path=/foo/bar")
-	testCookieParse(t, "foo=bar; max-age= 101 ; expires= Tue, 10 Nov 2009 23:00:00 GMT", "foo=bar; max-age=101")
-	testCookieParse(t, " xxx = yyy  ; path=/a/b;;;domain=foobar.com ; expires= Tue, 10 Nov 2009 23:00:00 GMT ; ;;",
-		"xxx=yyy; expires=Tue, 10 Nov 2009 23:00:00 GMT; domain=foobar.com; path=/a/b")
+	testCookieParse(t, "foo=bar; Domain=aaa.com; PATH=/foo/bar", "foo=bar; Domain=aaa.com; Path=/foo/bar")
+	testCookieParse(t, "foo=bar; Max-Age= 101; Expires= Tue, 10 Nov 2009 23:00:00 GMT", "foo=bar; Max-Age=101; Expires=Tue, 10 Nov 2009 23:00:00 GMT")
+	testCookieParse(t, " xxx = yyy  ; Path=/a/b;;;Domain=foobar.com ; Expires= Tue, 10 Nov 2009 23:00:00 GMT ; ;;",
+		"xxx=yyy; Expires=Tue, 10 Nov 2009 23:00:00 GMT; Domain=foobar.com; Path=/a/b")
 }
 
 func testCookieParse(t *testing.T, s, expectedS string) {
@@ -369,13 +369,13 @@ func TestCookieAppendBytes(t *testing.T) {
 	testCookieAppendBytes(t, c, "ффф", "12 лодлы", "ффф=12 лодлы")
 
 	c.SetDomain("foobar.com")
-	testCookieAppendBytes(t, c, "a", "b", "a=b; domain=foobar.com")
+	testCookieAppendBytes(t, c, "a", "b", "a=b; Domain=foobar.com")
 
 	c.SetPath("/a/b")
-	testCookieAppendBytes(t, c, "aa", "bb", "aa=bb; domain=foobar.com; path=/a/b")
+	testCookieAppendBytes(t, c, "aa", "bb", "aa=bb; Domain=foobar.com; Path=/a/b")
 
 	c.SetExpire(CookieExpireDelete)
-	testCookieAppendBytes(t, c, "xxx", "yyy", "xxx=yyy; expires=Tue, 10 Nov 2009 23:00:00 GMT; domain=foobar.com; path=/a/b")
+	testCookieAppendBytes(t, c, "xxx", "yyy", "xxx=yyy; Expires=Tue, 10 Nov 2009 23:00:00 GMT; Domain=foobar.com; Path=/a/b")
 }
 
 func testCookieAppendBytes(t *testing.T, c *Cookie, key, value, expectedS string) {

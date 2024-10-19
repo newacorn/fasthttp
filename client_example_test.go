@@ -3,16 +3,18 @@ package fasthttp_test
 import (
 	"log"
 
-	"github.com/valyala/fasthttp"
+	"github.com/newacorn/fasthttp"
 )
 
 func ExampleHostClient() {
 	// Prepare a client, which fetches webpages via HTTP proxy listening
 	// on the localhost:8080.
-	c := &fasthttp.HostClient{
-		Addr: "localhost:8080",
+	c, err := fasthttp.NewHostClient(fasthttp.Config{
+		Addrs: []string{"localhost:8080"},
+	})
+	if err != nil {
+		log.Fatal(err)
 	}
-
 	// Fetch google page via local proxy.
 	statusCode, body, err := c.Get(nil, "http://google.com/foo/bar")
 	if err != nil {

@@ -106,10 +106,12 @@ func TestCompressHandlerBrotliLevel(t *testing.T) {
 	t.Parallel()
 
 	expectedBody := createFixedBody(2e4)
-	h := CompressHandlerBrotliLevel(func(ctx *RequestCtx) {
+	h := CompressHandlerLevel(func(ctx *RequestCtx) {
 		ctx.Write(expectedBody) //nolint:errcheck
-	}, CompressBrotliDefaultCompression, CompressDefaultCompression)
-
+	}, CompressConfig{
+		Algs:   [4]CompressAlg{Br, Gzip, Deflate, Zstd},
+		Levels: [4]int8{CompressBrotliDefaultCompression, CompressDefaultCompression, CompressDefaultCompression, CompressDefaultCompression},
+	})
 	var ctx RequestCtx
 	var resp Response
 

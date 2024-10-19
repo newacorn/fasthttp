@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -25,6 +26,7 @@ type workerPool struct {
 	mustStop     bool
 
 	MaxIdleWorkerDuration time.Duration
+	cleanThresholdFunc    CleanThresholdFunc
 
 	Logger Logger
 
@@ -37,12 +39,54 @@ type workerPool struct {
 
 	workerChanPool sync.Pool
 
-	connState func(net.Conn, ConnState)
+	connState   func(net.Conn, ConnState)
+	open        *int32
+	concurrency *uint32
 }
 
 type workerChan struct {
 	lastUseTime time.Time
 	ch          chan net.Conn
+}
+
+// CleanThresholdFunc t1, t2, t3 and t4 are 1/8 1/4 1/2 3/4 workerChan's lastUseTime respectively.
+// cleanNum is the number of workerChan to clean. zero represents no op.
+type CleanThresholdFunc func(t1, t2, t3, t4 *time.Time, readyLen, maxWorkersCount int, maxIdleWorkerDuration time.Duration) (cleanNum int)
+
+var DefaultCleanThresholdFunc = func(t1, t2, t3, t4 *time.Time, readyLen, maxWorkersCount int, maxIdleWorkerDuration time.Duration) (cleanNum int) {
+	if readyLen <= 2>>10 {
+		return
+	}
+
+	now := time.Now()
+	if readyLen <= maxWorkersCount>>2 {
+		if now.Sub(*t3) > maxIdleWorkerDuration {
+			return readyLen >> 2
+		}
+		if now.Sub(*t4) > maxIdleWorkerDuration {
+			return readyLen >> 1
+		}
+		return
+	}
+
+	if readyLen <= maxWorkersCount>>1 {
+		if now.Sub(*t2) > maxIdleWorkerDuration {
+			return readyLen >> 2
+		}
+		if now.Sub(*t3) > maxIdleWorkerDuration {
+			return readyLen >> 1
+		}
+		return
+	}
+
+	if readyLen <= maxWorkersCount {
+		if now.Sub(*t3) > maxIdleWorkerDuration {
+			return readyLen >> 1
+		}
+		return
+	}
+
+	return 0
 }
 
 func (wp *workerPool) Start() {
@@ -98,36 +142,27 @@ func (wp *workerPool) getMaxIdleWorkerDuration() time.Duration {
 	return wp.MaxIdleWorkerDuration
 }
 
+// clean specific number of workerChan in ready list, according cleanThresholdFunc method return value.
 func (wp *workerPool) clean(scratch *[]*workerChan) {
-	maxIdleWorkerDuration := wp.getMaxIdleWorkerDuration()
-
-	// Clean least recently used workers if they didn't serve connections
-	// for more than maxIdleWorkerDuration.
-	criticalTime := time.Now().Add(-maxIdleWorkerDuration)
-
 	wp.lock.Lock()
 	ready := wp.ready
 	n := len(ready)
-
-	// Use binary-search algorithm to find out the index of the least recently worker which can be cleaned up.
-	l, r := 0, n-1
-	for l <= r {
-		mid := (l + r) / 2
-		if criticalTime.After(wp.ready[mid].lastUseTime) {
-			l = mid + 1
-		} else {
-			r = mid - 1
-		}
+	cleanNum := 0
+	if n > 0 {
+		cleanNum = wp.cleanThresholdFunc(&ready[n>>3].lastUseTime, &ready[n>>2].lastUseTime, &ready[n>>1].lastUseTime, &ready[n*3/4].lastUseTime, n, wp.MaxWorkersCount, wp.MaxIdleWorkerDuration)
 	}
-	i := r
-	if i == -1 {
+	if cleanNum == 0 {
 		wp.lock.Unlock()
 		return
 	}
-
-	*scratch = append((*scratch)[:0], ready[:i+1]...)
-	m := copy(ready, ready[i+1:])
-	for i = m; i < n; i++ {
+	if cap(*scratch) < cleanNum {
+		*scratch = make([]*workerChan, cleanNum)
+	} else {
+		*scratch = (*scratch)[:cleanNum]
+	}
+	copy(*scratch, ready)
+	m := copy(ready, ready[cleanNum:])
+	for i := m; i < n; i++ {
 		ready[i] = nil
 	}
 	wp.ready = ready[:m]
@@ -220,7 +255,10 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 		if c == nil {
 			break
 		}
-
+		// here c's status is really StateNew.
+		atomic.AddUint32(wp.concurrency, 1)
+		wp.connState(c, StateNew)
+		//log.Println(c.RemoteAddr(), "->", c.LocalAddr())
 		if err = wp.WorkerFunc(c); err != nil && err != errHijacked {
 			errStr := err.Error()
 			if wp.LogAllErrors || !(strings.Contains(errStr, "broken pipe") ||
@@ -232,13 +270,15 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 				wp.Logger.Printf("error when serving connection %q<->%q: %v", c.LocalAddr(), c.RemoteAddr(), err)
 			}
 		}
+		atomic.AddInt32(wp.open, -1)
+		atomic.AddUint32(wp.concurrency, ^uint32(0))
 		if err == errHijacked {
 			wp.connState(c, StateHijacked)
 		} else {
-			_ = c.Close()
+			//goland:noinspection GoUnhandledErrorResult
+			c.Close()
 			wp.connState(c, StateClosed)
 		}
-
 		if !wp.release(ch) {
 			break
 		}

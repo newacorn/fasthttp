@@ -54,7 +54,7 @@ func FuzzResponseReadLimitBody(f *testing.F) {
 		res := AcquireResponse()
 		defer ReleaseResponse(res)
 
-		_ = res.ReadLimitBody(bufio.NewReader(bytes.NewReader(body)), max)
+		_ = res.ReadLimit(bufio.NewReader(bytes.NewReader(body)), int64(max))
 	})
 }
 
@@ -73,7 +73,7 @@ func FuzzRequestReadLimitBody(f *testing.F) {
 		req := AcquireRequest()
 		defer ReleaseRequest(req)
 
-		_ = req.ReadLimitBody(bufio.NewReader(bytes.NewReader(body)), max)
+		_ = req.ReadLimit(bufio.NewReader(bytes.NewReader(body)), int64(max))
 	})
 }
 

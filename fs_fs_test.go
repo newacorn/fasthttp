@@ -48,7 +48,7 @@ func TestFSServeFileHead(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	contentLength := resp.Header.ContentLength()
-	if contentLength != len(expectedBody) {
+	if contentLength != int64(len(expectedBody)) {
 		t.Fatalf("unexpected Content-Length: %d. expecting %d", contentLength, len(expectedBody))
 	}
 }
@@ -187,7 +187,6 @@ func TestFSFSCompressConcurrent(t *testing.T) {
 		Root:               ".",
 		GenerateIndexPages: true,
 		Compress:           true,
-		CompressBrotli:     true,
 		CleanStop:          stop,
 	}
 	h := fs.NewRequestHandler()
@@ -225,7 +224,6 @@ func TestFSFSCompressSingleThread(t *testing.T) {
 		Root:               ".",
 		GenerateIndexPages: true,
 		Compress:           true,
-		CompressBrotli:     true,
 		CleanStop:          stop,
 	}
 	h := fs.NewRequestHandler()
@@ -400,7 +398,7 @@ func TestDirFSServeFileHead(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	contentLength := resp.Header.ContentLength()
-	if contentLength != len(expectedBody) {
+	if contentLength != int64(len(expectedBody)) {
 		t.Fatalf("unexpected Content-Length: %d. expecting %d", contentLength, len(expectedBody))
 	}
 }
@@ -535,7 +533,6 @@ func TestDirFSFSCompressConcurrent(t *testing.T) {
 		Root:               ".",
 		GenerateIndexPages: true,
 		Compress:           true,
-		CompressBrotli:     true,
 		CleanStop:          stop,
 	}
 	h := fs.NewRequestHandler()
@@ -573,7 +570,6 @@ func TestDirFSFSCompressSingleThread(t *testing.T) {
 		Root:               ".",
 		GenerateIndexPages: true,
 		Compress:           true,
-		CompressBrotli:     true,
 		CleanStop:          stop,
 	}
 	h := fs.NewRequestHandler()
@@ -718,3 +714,10 @@ func TestFSFSGenerateIndexOsDirFS(t *testing.T) {
 		}
 	})
 }
+
+/*
+func TestOpenDot(t *testing.T) {
+	//d := os.DirFS("/Users/acorn")
+	//log.Println(d.Open("a.txt"))
+}
+*/

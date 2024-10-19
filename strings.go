@@ -17,6 +17,7 @@ var (
 	strSlashDotDotBackSlash     = []byte(`/..\`)
 	strBackSlashDotDotBackSlash = []byte(`\..\`)
 	strCRLF                     = []byte("\r\n")
+	strDoubleCRLF               = []byte("\r\n\r\n")
 	strHTTP                     = []byte("http")
 	strHTTPS                    = []byte("https")
 	strHTTP11                   = []byte("HTTP/1.1")
@@ -26,7 +27,8 @@ var (
 	strCommaSpace               = []byte(", ")
 	strGMT                      = []byte("GMT")
 
-	strResponseContinue = []byte("HTTP/1.1 100 Continue\r\n\r\n")
+	strResponseContinue     = "HTTP/1.1 100 Continue\r\n\r\n"
+	strResponseContinueFail = "HTTP/1.1 417 Expectation Failed\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
 
 	strExpect             = []byte(HeaderExpect)
 	strConnection         = []byte(HeaderConnection)
@@ -58,13 +60,13 @@ var (
 	strWWWAuthenticate    = []byte(HeaderWWWAuthenticate)
 	strVary               = []byte(HeaderVary)
 
-	strCookieExpires        = []byte("expires")
-	strCookieDomain         = []byte("domain")
-	strCookiePath           = []byte("path")
+	strCookieExpires        = []byte("Expires")
+	strCookieDomain         = []byte("Domain")
+	strCookiePath           = []byte("Path")
 	strCookieHTTPOnly       = []byte("HttpOnly")
-	strCookieSecure         = []byte("secure")
+	strCookieSecure         = []byte("Secure")
 	strCookiePartitioned    = []byte("Partitioned")
-	strCookieMaxAge         = []byte("max-age")
+	strCookieMaxAge         = []byte("Max-Age")
 	strCookieSameSite       = []byte("SameSite")
 	strCookieSameSiteLax    = []byte("Lax")
 	strCookieSameSiteStrict = []byte("Strict")

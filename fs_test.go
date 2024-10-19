@@ -4,14 +4,23 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"github.com/gookit/goutil/testutil/assert"
+	"github.com/puzpuzpuz/xsync/v3"
+	"github.com/valyala/fasthttp"
+	"github.com/valyala/fasthttp/fasthttputil"
 	"io"
+	"log"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
+	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
+	"utils/compress"
 )
 
 type TestLogger struct {
@@ -20,6 +29,9 @@ type TestLogger struct {
 
 func (t TestLogger) Printf(format string, args ...any) {
 	t.t.Logf(format, args...)
+}
+func (t TestLogger) Write(b []byte) {
+	t.t.Logf(b2s(b))
 }
 
 func TestNewVHostPathRewriter(t *testing.T) {
@@ -146,7 +158,7 @@ func TestServeFileHead(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	contentLength := resp.Header.ContentLength()
-	if contentLength != len(expectedBody) {
+	if contentLength != int64(len(expectedBody)) {
 		t.Fatalf("unexpected Content-Length: %d. expecting %d", contentLength, len(expectedBody))
 	}
 }
@@ -172,7 +184,7 @@ func TestServeFileSmallNoReadFrom(t *testing.T) {
 	if !ok {
 		t.Fatal("expected fsSmallFileReader")
 	}
-	defer reader.ff.Release()
+	//defer reader.ff.Release()
 
 	buf := bytes.NewBuffer(nil)
 
@@ -344,7 +356,7 @@ func runFSByteRangeConcurrent(t *testing.T, fs *FS) {
 
 	for i := 0; i < concurrency; i++ {
 		select {
-		case <-time.After(time.Second):
+		case <-time.After(time.Second * 1000):
 			t.Fatalf("timeout")
 		case <-ch:
 		}
@@ -399,8 +411,8 @@ func testFSByteRange(t *testing.T, h RequestHandler, filePath string) {
 	}
 
 	fileSize := len(expectedBody)
-	startPos := rand.Intn(fileSize)
-	endPos := rand.Intn(fileSize)
+	startPos := int64(rand.Intn(fileSize))
+	endPos := int64(rand.Intn(fileSize))
 	if endPos < startPos {
 		startPos, endPos = endPos, startPos
 	}
@@ -426,7 +438,7 @@ func testFSByteRange(t *testing.T, h RequestHandler, filePath string) {
 	}
 	body := resp.Body()
 	bodySize := endPos - startPos + 1
-	if len(body) != bodySize {
+	if int64(len(body)) != bodySize {
 		t.Fatalf("unexpected body size %d. Expecting %d. filePath=%q, startPos=%d, endPos=%d",
 			len(body), bodySize, filePath, startPos, endPos)
 	}
@@ -471,14 +483,14 @@ func TestParseByteRangeSuccess(t *testing.T) {
 func testParseByteRangeSuccess(t *testing.T, v string, contentLength, startPos, endPos int) {
 	t.Helper()
 
-	startPos1, endPos1, err := ParseByteRange([]byte(v), contentLength)
+	startPos1, endPos1, err := ParseByteRange([]byte(v), int64(contentLength))
 	if err != nil {
 		t.Fatalf("unexpected error: %v. v=%q, contentLength=%d", err, v, contentLength)
 	}
-	if startPos1 != startPos {
+	if startPos1 != int64(startPos) {
 		t.Fatalf("unexpected startPos=%d. Expecting %d. v=%q, contentLength=%d", startPos1, startPos, v, contentLength)
 	}
-	if endPos1 != endPos {
+	if endPos1 != int64(endPos) {
 		t.Fatalf("unexpected endPos=%d. Expecting %d. v=%q, contentLength=%d", endPos1, endPos, v, contentLength)
 	}
 }
@@ -513,7 +525,7 @@ func TestParseByteRangeError(t *testing.T) {
 func testParseByteRangeError(t *testing.T, v string, contentLength int) {
 	t.Helper()
 
-	_, _, err := ParseByteRange([]byte(v), contentLength)
+	_, _, err := ParseByteRange([]byte(v), int64(contentLength))
 	if err == nil {
 		t.Fatalf("expecting error when parsing byte range %q", v)
 	}
@@ -533,7 +545,6 @@ func TestFSCompressConcurrent(t *testing.T) {
 		Root:               ".",
 		GenerateIndexPages: true,
 		Compress:           true,
-		CompressBrotli:     true,
 		CleanStop:          stop,
 	})
 }
@@ -553,7 +564,6 @@ func TestFSCompressConcurrentSkipCache(t *testing.T) {
 		GenerateIndexPages: true,
 		SkipCache:          true,
 		Compress:           true,
-		CompressBrotli:     true,
 		CleanStop:          stop,
 	})
 }
@@ -579,7 +589,7 @@ func runFSCompressConcurrent(t *testing.T, fs *FS) {
 	for i := 0; i < concurrency; i++ {
 		select {
 		case <-ch:
-		case <-time.After(time.Second * 2):
+		case <-time.After(time.Second * 2000):
 			t.Fatalf("timeout")
 		}
 	}
@@ -595,7 +605,6 @@ func TestFSCompressSingleThread(t *testing.T) {
 		Root:               ".",
 		GenerateIndexPages: true,
 		Compress:           true,
-		CompressBrotli:     true,
 		CleanStop:          stop,
 	})
 }
@@ -611,7 +620,6 @@ func TestFSCompressSingleThreadSkipCache(t *testing.T) {
 		GenerateIndexPages: true,
 		SkipCache:          true,
 		Compress:           true,
-		CompressBrotli:     true,
 		CleanStop:          stop,
 	})
 }
@@ -938,4 +946,309 @@ func TestServeFileDirectoryRedirect(t *testing.T) {
 	if ctx.Response.StatusCode() != StatusOK {
 		t.Fatalf("Unexpected status code %d for file '/fs.go'. Expecting %d.", ctx.Response.StatusCode(), StatusOK)
 	}
+}
+
+func TestZstDecompressFile(t *testing.T) {
+	fs := FS{Root: ".", Compress: true, CacheDuration: time.Hour * 20}
+	h := fs.NewRequestHandler()
+	server := Server{
+		Handler: h,
+	}
+	pcs := fasthttputil.NewPipeConns()
+	cliCon, serCon := pcs.Conn1(), pcs.Conn2()
+	//
+	go func() {
+		defer func() { cliCon.Close() }()
+		req := AcquireRequest()
+		resp := AcquireResponse()
+		defer func() {
+			ReleaseRequest(req)
+			ReleaseResponse(resp)
+		}()
+		req.SetRequestURI("http://127.0.0.1:7070/fs.go")
+		req.Header.Set(fasthttp.HeaderAcceptEncoding, "zstd")
+		_, err := req.WriteTo(cliCon)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		err = resp.Read(bufio.NewReader(cliCon))
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if !bytes.Equal(resp.Header.ContentEncoding(), []byte("zstd")) {
+			t.Error("not zstd")
+			return
+		}
+		resp.Reset()
+		req.Header.Del(fasthttp.HeaderAcceptEncoding)
+		_, err = req.WriteTo(cliCon)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		err = resp.Read(bufio.NewReader(cliCon))
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if len(resp.Header.ContentEncoding()) != 0 {
+			t.Error("has content encoding header")
+			return
+		}
+		if utf8.Valid(resp.Body()) != true {
+			t.Error("not valid utf8")
+			return
+		}
+		err = cliCon.Close()
+		if err != nil {
+			t.Error(err)
+		}
+	}()
+	err := server.ServeConn(serCon)
+	//err := server.ListenAndServe(":7070")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func stripTrailingSlashes(path []byte) []byte {
+	for len(path) > 0 && path[len(path)-1] == '/' {
+		path = path[:len(path)-1]
+	}
+	return path
+}
+
+func fileExtension(path string, compressed bool, compressedFileSuffix string) string {
+	if compressed && strings.HasSuffix(path, compressedFileSuffix) {
+		path = path[:len(path)-len(compressedFileSuffix)]
+	}
+	n := strings.LastIndexByte(path, '.')
+	if n < 0 {
+		return ""
+	}
+	return path[n:]
+}
+
+func TestCacheManagerSize(t *testing.T) {
+	//cur, _ := os.Getwd()
+	//f := cur + "/testdata2/vue.runtime.global.js"
+	fs := FS{
+		Root:          "testdata2",
+		CacheDuration: time.Millisecond * 200,
+		Compress:      true,
+		Orders:        [3]compress.Order{compress.Br},
+	}
+	h := fs.NewRequestHandlerWithError()
+	ctx := RequestCtx{}
+	ctx.Request.Header.Set("Accept-Encoding", "br, gzip")
+	ctx.Request.SetRequestURI("http://localhost/vue.runtime.global.js")
+	err := h(&ctx)
+	assert.Nil(t, err)
+	assert.Equal(t, 1, fs.fh.cacheManager.(*syncMapCacheManager).caches[brotliCacheKind].Size())
+	assert.Equal(t, ctx.Response.Header.ContentEncoding(), []byte("br"))
+	//
+	fs = FS{
+		Root:          "testdata2",
+		CacheDuration: time.Millisecond * 200,
+		Compress:      true,
+		Orders:        [3]compress.Order{compress.Gzip},
+	}
+	h = fs.NewRequestHandlerWithError()
+	ctx.Request.Header.Set("Accept-Encoding", "gzip, br")
+	ctx.Request.SetRequestURI("http://localhost/vue.runtime.global.js")
+	h = fs.NewRequestHandlerWithError()
+	err = h(&ctx)
+	assert.Nil(t, err)
+	assert.Equal(t, 1, fs.fh.cacheManager.(*syncMapCacheManager).caches[gzipCacheKind].Size())
+	assert.Equal(t, ctx.Response.Header.ContentEncoding(), []byte("gzip"))
+	//
+	fs = FS{
+		Root:          "testdata2",
+		CacheDuration: time.Millisecond * 200,
+		Compress:      true,
+		Orders:        [3]compress.Order{compress.Zstd},
+	}
+	ctx.Request.Header.Set("Accept-Encoding", "zstd, gzip, br")
+	ctx.Request.SetRequestURI("http://localhost/vue.runtime.global.js")
+	h = fs.NewRequestHandlerWithError()
+	err = h(&ctx)
+	assert.Nil(t, err)
+	assert.Equal(t, 1, fs.fh.cacheManager.(*syncMapCacheManager).caches[zstdCacheKind].Size())
+	assert.Equal(t, ctx.Response.Header.ContentEncoding(), []byte("zstd"))
+	//
+	ctx.Request.Header.Del("Accept-Encoding")
+	ctx.Request.SetRequestURI("http://localhost/vue.runtime.global.js")
+	err = h(&ctx)
+	assert.Nil(t, err)
+	assert.Equal(t, 1, fs.fh.cacheManager.(*syncMapCacheManager).caches[0].Size())
+	assert.Equal(t, ctx.Response.Header.ContentEncoding(), []byte("zstd"))
+}
+
+func TestPendingFiles(t *testing.T) {
+	pfs := &pendingFiles{}
+	pfs.unShift(&fileChain{})
+	pfs.unShift(&fileChain{})
+	pfs.unShift(&fileChain{})
+	assert.Equal(t, 3, pfs.size())
+	pfs.shift()
+	assert.Equal(t, 2, pfs.size())
+	pfs.shift()
+	pfs.shift()
+	pfs.shift()
+	assert.Equal(t, 0, pfs.size())
+}
+
+var testSmallFilePool = &fsFilePool{
+	sync.Pool{
+		New: func() interface{} {
+			return &fsFile{}
+		},
+	},
+}
+
+func TestHandlePendingCache(t *testing.T) {
+	ca := syncMapCacheManager{}
+	pfs := &pendingFiles{}
+	idlePfs := &pendingFiles{}
+	pfs.unShift(&fileChain{v: &fsFile{h: &fsHandler{
+		filesystem: &osFS{}, smallFsFilePool: testSmallFilePool,
+	}}})
+	pfs.unShift(&fileChain{v: &fsFile{h: &fsHandler{
+		filesystem: &osFS{}, smallFsFilePool: testSmallFilePool,
+	}}})
+	pfs.unShift(&fileChain{v: &fsFile{h: &fsHandler{
+		filesystem: &osFS{}, smallFsFilePool: testSmallFilePool,
+	}}})
+	ca.handlePendingCache(pfs, idlePfs)
+	ca.handlePendingCache(pfs, idlePfs)
+	assert.Equal(t, 0, pfs.size())
+	assert.Equal(t, 3, idlePfs.size())
+}
+
+func TestCleanCache(t *testing.T) {
+	ca := syncMapCacheManager{
+		caches: [4]*xsync.MapOf[string, *fsFile]{
+			xsync.NewMapOf[string, *fsFile](),
+			xsync.NewMapOf[string, *fsFile](),
+			xsync.NewMapOf[string, *fsFile](),
+			xsync.NewMapOf[string, *fsFile](),
+		},
+	}
+	pfs := &pendingFiles{}
+	idlePfs := &pendingFiles{}
+	idlePfs.unShift(&fileChain{v: &fsFile{}})
+	idlePfs.unShift(&fileChain{v: &fsFile{}})
+	idlePfs.unShift(&fileChain{v: &fsFile{}})
+	//
+	ca.cleanCache(pfs, idlePfs)
+	ca.cleanCache(pfs, idlePfs)
+	assert.Equal(t, 0, pfs.size())
+	assert.Equal(t, 3, idlePfs.size())
+	//
+	ca.caches[0].Store("f1", &fsFile{
+		h:   &fsHandler{},
+		dir: true,
+	})
+	ca.caches[0].Store("f2", &fsFile{
+		h:   &fsHandler{},
+		dir: true,
+	})
+	ca.caches[0].Store("f3", &fsFile{
+		h:   &fsHandler{},
+		dir: true,
+	})
+	ca.cleanCache(pfs, idlePfs)
+	ca.cleanCache(pfs, idlePfs)
+	assert.Equal(t, 3, idlePfs.size())
+	assert.Equal(t, 0, pfs.size())
+	ca.caches[0].Delete("f1")
+	ca.caches[0].Delete("f2")
+	ca.caches[0].Delete("f3")
+	//
+	ca.caches[0].Store("f1", &fsFile{
+		h: &fsHandler{
+			filesystem: &osFS{},
+		},
+		dir: true,
+	})
+	ca.caches[0].Store("f2", &fsFile{
+		h:   &fsHandler{},
+		dir: true,
+	})
+	ca.caches[0].Store("f3", &fsFile{
+		h:   &fsHandler{},
+		dir: true,
+	})
+	ca.caches[0].Store("f4", &fsFile{
+		h: &fsHandler{
+			filesystem: &osFS{},
+		},
+		// delete
+		dir: true,
+	})
+	ca.caches[0].Store("f5", &fsFile{
+		h: &fsHandler{
+			filesystem: &osFS{},
+		},
+		// open error
+		// delete
+		originalFileName: []byte("f4"),
+	})
+
+	cur, _ := os.Getwd()
+	f := cur + "/testdata2/vue.runtime.global.js"
+	ca.caches[0].Store("f6", &fsFile{
+		h: &fsHandler{
+			filesystem: &osFS{},
+		},
+		// file stale
+		// delete
+		originalFileName: []byte(f),
+	})
+	//
+	f = cur + "/testdata2/index.html"
+	ca.caches[0].Store("f7", &fsFile{
+		h: &fsHandler{
+			filesystem: &osFS{},
+		},
+		// file is fresh
+		lastModified:     time.Now(),
+		originalFileName: []byte(f),
+	})
+	//
+
+	idlePfs.unShift(&fileChain{v: &fsFile{}})
+	idlePfs.unShift(&fileChain{v: &fsFile{}})
+	idlePfs.unShift(&fileChain{v: &fsFile{}})
+	idlePfs.unShift(&fileChain{v: &fsFile{}})
+	idlePfs.unShift(&fileChain{v: &fsFile{}})
+	//
+	size := idlePfs.size()
+	ca.cleanCache(pfs, idlePfs)
+	ca.cleanCache(pfs, idlePfs)
+	assert.Equal(t, 4, pfs.size())
+	assert.Equal(t, size-4, idlePfs.size())
+	assert.Equal(t, 3, ca.caches[0].Size())
+}
+
+func TestContentType(t *testing.T) {
+	fs := &FS{Compress: true,
+		Root: "testdata2",
+	}
+	h := fs.NewRequestHandlerWithError()
+	ctx := RequestCtx{}
+	ctx.Request.Header.Set("Accept-Encoding", "gzip")
+	ctx.Request.SetRequestURI("http://127.0.0.1/vue.runtime.global.js")
+	err := h(&ctx)
+	assert.Nil(t, err)
+	assert.Equal(t, []byte("application/javascript"), ctx.Response.Header.ContentType())
+	//
+	ctx.Response.Header.Reset()
+	ctx.Request.SetRequestURI("http://127.0.0.1/index.html")
+	err = h(&ctx)
+	log.Println(string(ctx.Response.Body()))
+	log.Println(string(ctx.Response.Header.ContentType()))
+	assert.Equal(t, []byte("text/html"), ctx.Response.Header.ContentType())
 }

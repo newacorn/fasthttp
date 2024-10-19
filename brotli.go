@@ -3,8 +3,10 @@ package fasthttp
 import (
 	"bytes"
 	"fmt"
+	"github.com/google/brotli/go/cbrotli"
 	"io"
 	"sync"
+	ucompress "utils/compress"
 
 	"github.com/andybalholm/brotli"
 	"github.com/valyala/bytebufferpool"
@@ -13,37 +15,24 @@ import (
 
 // Supported compression levels.
 const (
-	CompressBrotliNoCompression   = 0
-	CompressBrotliBestSpeed       = brotli.BestSpeed
-	CompressBrotliBestCompression = brotli.BestCompression
-
-	// Choose a default brotli compression level comparable to
-	// CompressDefaultCompression (gzip 6)
-	// See: https://github.com/valyala/fasthttp/issues/798#issuecomment-626293806
-	CompressBrotliDefaultCompression = 4
+	CompressBrotliNoCompression      = 0
+	CompressBrotliBestSpeed          = brotli.BestSpeed
+	CompressBrotliBestCompression    = brotli.BestCompression
+	CompressBrotliDefaultCompression = 3
 )
 
-func acquireBrotliReader(r io.Reader) (*brotli.Reader, error) {
-	v := brotliReaderPool.Get()
-	if v == nil {
-		return brotli.NewReader(r), nil
-	}
-	zr := v.(*brotli.Reader)
-	if err := zr.Reset(r); err != nil {
-		return nil, err
-	}
-	return zr, nil
+func acquireBrotliReader(r io.Reader) (br *cbrotli.ReaderV2, err error) {
+	br = ucompress.DefaultCBrotliReaderPool.Get()
+	err = br.Reset(r)
+	return
 }
 
-func releaseBrotliReader(zr *brotli.Reader) {
-	brotliReaderPool.Put(zr)
+func releaseBrotliReader(br *cbrotli.ReaderV2) {
+	ucompress.DefaultCBrotliReaderPool.Put(br)
 }
-
-var brotliReaderPool sync.Pool
 
 func acquireStacklessBrotliWriter(w io.Writer, level int) stackless.Writer {
-	nLevel := normalizeBrotliCompressLevel(level)
-	p := stacklessBrotliWriterPoolMap[nLevel]
+	p := stacklessBrotliWriterPoolMap[normalizeBrotliCompressLevel(level)]
 	v := p.Get()
 	if v == nil {
 		return stackless.NewWriter(w, func(w io.Writer) stackless.Writer {
@@ -56,35 +45,25 @@ func acquireStacklessBrotliWriter(w io.Writer, level int) stackless.Writer {
 }
 
 func releaseStacklessBrotliWriter(sw stackless.Writer, level int) {
-	sw.Close()
+	_ = sw.Close()
 	nLevel := normalizeBrotliCompressLevel(level)
 	p := stacklessBrotliWriterPoolMap[nLevel]
 	p.Put(sw)
 }
 
-func acquireRealBrotliWriter(w io.Writer, level int) *brotli.Writer {
-	nLevel := normalizeBrotliCompressLevel(level)
-	p := realBrotliWriterPoolMap[nLevel]
-	v := p.Get()
-	if v == nil {
-		zw := brotli.NewWriterLevel(w, level)
-		return zw
-	}
-	zw := v.(*brotli.Writer)
-	zw.Reset(w)
-	return zw
+func acquireRealBrotliWriter(w io.Writer, level int) (bw ucompress.Writer) {
+	bw = ucompress.DefaultCBrotliCompressPools.Pool(level).Get()
+	bw.Reset(w)
+	return
 }
 
-func releaseRealBrotliWriter(zw *brotli.Writer, level int) {
-	zw.Close()
-	nLevel := normalizeBrotliCompressLevel(level)
-	p := realBrotliWriterPoolMap[nLevel]
-	p.Put(zw)
+func releaseRealBrotliWriter(bw ucompress.Writer, level int) {
+	_ = bw.Close()
+	ucompress.DefaultCBrotliCompressPools.Pool(level).Put(bw)
 }
 
 var (
 	stacklessBrotliWriterPoolMap = newCompressWriterPoolMap()
-	realBrotliWriterPoolMap      = newCompressWriterPoolMap()
 )
 
 // AppendBrotliBytesLevel appends brotlied src to dst using the given
@@ -98,7 +77,7 @@ var (
 //   - CompressBrotliDefaultCompression
 func AppendBrotliBytesLevel(dst, src []byte, level int) []byte {
 	w := &byteSliceWriter{dst}
-	WriteBrotliLevel(w, src, level) //nolint:errcheck
+	_, _ = WriteBrotliLevel(w, src, level) //nolint:errcheck
 	return w.b
 }
 
@@ -148,7 +127,7 @@ func nonblockingWriteBrotli(ctxv any) {
 	ctx := ctxv.(*compressCtx)
 	zw := acquireRealBrotliWriter(ctx.w, ctx.level)
 
-	zw.Write(ctx.p) //nolint:errcheck // no way to handle this error anyway
+	_, _ = zw.Write(ctx.p) //nolint:errcheck // no way to handle this error anyway
 
 	releaseRealBrotliWriter(zw, ctx.level)
 }
@@ -191,10 +170,8 @@ func AppendUnbrotliBytes(dst, src []byte) ([]byte, error) {
 // normalizes compression level into [0..11], so it could be used as an index
 // in *PoolMap.
 func normalizeBrotliCompressLevel(level int) int {
-	// -2 is the lowest compression level - CompressHuffmanOnly
-	// 9 is the highest compression level - CompressBestCompression
 	if level < 0 || level > 11 {
-		level = CompressBrotliDefaultCompression
+		level = ucompress.BrotliDefaultLevel
 	}
 	return level
 }

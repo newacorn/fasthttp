@@ -10,7 +10,7 @@ import (
 )
 
 type headerInterface interface {
-	ContentLength() int
+	ContentLength() int64
 	ReadTrailer(r *bufio.Reader) error
 }
 
@@ -18,27 +18,29 @@ type requestStream struct {
 	header          headerInterface
 	prefetchedBytes *bytes.Reader
 	reader          *bufio.Reader
-	totalBytesRead  int
+	totalBytesRead  int64
 	chunkLeft       int
 }
 
-func (rs *requestStream) Read(p []byte) (int, error) {
+func (rs *requestStream) Read(p []byte) (n int, err error) {
+	// here Content-Length must > 0 or -1 for chunked encoding.
 	var (
-		n   int
-		err error
+		chunkSize int
 	)
 	if rs.header.ContentLength() == -1 {
 		if rs.chunkLeft == 0 {
-			chunkSize, err := parseChunkSize(rs.reader)
+			// read a chunk size and consume size + CRLF
+			chunkSize, err = parseChunkSize(rs.reader)
 			if err != nil {
-				return 0, err
+				return
 			}
 			if chunkSize == 0 {
 				err = rs.header.ReadTrailer(rs.reader)
-				if err != nil && err != io.EOF {
-					return 0, err
+				if err != nil {
+					return
 				}
-				return 0, io.EOF
+				err = io.EOF
+				return
 			}
 			rs.chunkLeft = chunkSize
 		}
@@ -47,46 +49,39 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 			bytesToRead = rs.chunkLeft
 		}
 		n, err = rs.reader.Read(p[:bytesToRead])
-		rs.totalBytesRead += n
+		rs.totalBytesRead += int64(n)
 		rs.chunkLeft -= n
 		if err == io.EOF {
-			err = io.ErrUnexpectedEOF
+			err = ErrUnexpectedReqBodyEOF
+			return
 		}
 		if err == nil && rs.chunkLeft == 0 {
+			// consume every chunked message trailing CRLF
 			err = readCrLf(rs.reader)
 		}
-		return n, err
+		return
 	}
 	if rs.totalBytesRead == rs.header.ContentLength() {
-		return 0, io.EOF
+		err = io.EOF
+		return
 	}
 	prefetchedSize := int(rs.prefetchedBytes.Size())
-	if prefetchedSize > rs.totalBytesRead {
-		left := prefetchedSize - rs.totalBytesRead
-		if len(p) > left {
+	if int64(prefetchedSize) > rs.totalBytesRead {
+		left := int64(prefetchedSize) - rs.totalBytesRead
+		if int64(len(p)) > left {
 			p = p[:left]
 		}
-		n, err := rs.prefetchedBytes.Read(p)
-		rs.totalBytesRead += n
-		if n == rs.header.ContentLength() {
-			return n, io.EOF
-		}
-		return n, err
+		n, err = rs.prefetchedBytes.Read(p)
+		rs.totalBytesRead += int64(n)
+		return
 	}
 	left := rs.header.ContentLength() - rs.totalBytesRead
-	if len(p) > left {
+	if int64(len(p)) > left {
 		p = p[:left]
 	}
 	n, err = rs.reader.Read(p)
-	rs.totalBytesRead += n
-	if err != nil {
-		return n, err
-	}
-
-	if rs.totalBytesRead == rs.header.ContentLength() {
-		err = io.EOF
-	}
-	return n, err
+	rs.totalBytesRead += int64(n)
+	return
 }
 
 func acquireRequestStream(b *bytebufferpool.ByteBuffer, r *bufio.Reader, h headerInterface) *requestStream {

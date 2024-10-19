@@ -41,6 +41,9 @@ func testWorkerPoolStartStop() {
 		MaxWorkersCount: 10,
 		Logger:          defaultLogger,
 	}
+	if wp.cleanThresholdFunc == nil {
+		wp.cleanThresholdFunc = DefaultCleanThresholdFunc
+	}
 	for i := 0; i < 10; i++ {
 		wp.Start()
 		wp.Stop()
@@ -103,6 +106,11 @@ func testWorkerPoolMaxWorkersCount(t *testing.T) {
 		MaxWorkersCount: 10,
 		Logger:          defaultLogger,
 		connState:       func(net.Conn, ConnState) {},
+		open:            new(int32),
+		concurrency:     new(uint32),
+	}
+	if wp.cleanThresholdFunc == nil {
+		wp.cleanThresholdFunc = DefaultCleanThresholdFunc
 	}
 	wp.Start()
 

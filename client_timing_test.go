@@ -18,9 +18,9 @@ import (
 
 type fakeClientConn struct {
 	net.Conn
+	ch chan struct{}
 	s  []byte
 	n  int
-	ch chan struct{}
 }
 
 func (c *fakeClientConn) SetWriteDeadline(t time.Time) error {
@@ -96,8 +96,10 @@ func BenchmarkClientGetTimeoutFastServer(b *testing.B) {
 	body := []byte("123456789099")
 	s := []byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(body), body))
 	c := &Client{
-		Dial: func(addr string) (net.Conn, error) {
-			return acquireFakeServerConn(s), nil
+		Config: Config{
+			Dial: newDialHelper(func(addr string) (net.Conn, error) {
+				return acquireFakeServerConn(s), nil
+			}),
 		},
 	}
 
@@ -126,10 +128,12 @@ func BenchmarkClientDoFastServer(b *testing.B) {
 	body := []byte("012345678912")
 	s := []byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(body), body))
 	c := &Client{
-		Dial: func(addr string) (net.Conn, error) {
-			return acquireFakeServerConn(s), nil
+		Config: Config{
+			Dial: newDialHelper(func(addr string) (net.Conn, error) {
+				return acquireFakeServerConn(s), nil
+			}),
+			MaxConns: runtime.GOMAXPROCS(-1),
 		},
-		MaxConnsPerHost: runtime.GOMAXPROCS(-1),
 	}
 
 	nn := uint32(0)
@@ -227,7 +231,9 @@ func benchmarkClientGetEndToEndTCP(b *testing.B, parallelism int) {
 	}()
 
 	c := &Client{
-		MaxConnsPerHost: runtime.GOMAXPROCS(-1) * parallelism,
+		Config: Config{
+			MaxConns: runtime.GOMAXPROCS(-1) * parallelism,
+		},
 	}
 
 	requestURI := "/foo/bar?baz=123"
@@ -356,8 +362,10 @@ func benchmarkClientGetEndToEndInmemory(b *testing.B, parallelism int) {
 	}()
 
 	c := &Client{
-		MaxConnsPerHost: runtime.GOMAXPROCS(-1) * parallelism,
-		Dial:            func(addr string) (net.Conn, error) { return ln.Dial() },
+		Config: Config{
+			MaxConns: runtime.GOMAXPROCS(-1) * parallelism,
+			Dial:     newDialHelper(func(addr string) (net.Conn, error) { return ln.Dial() }),
+		},
 	}
 
 	requestURI := "/foo/bar?baz=123"
@@ -480,8 +488,10 @@ func benchmarkClientEndToEndBigResponseInmemory(b *testing.B, parallelism int) {
 	}()
 
 	c := &Client{
-		MaxConnsPerHost: runtime.GOMAXPROCS(-1) * parallelism,
-		Dial:            func(addr string) (net.Conn, error) { return ln.Dial() },
+		Config: Config{
+			MaxConns: runtime.GOMAXPROCS(-1) * parallelism,
+			Dial:     newDialHelper(func(addr string) (net.Conn, error) { return ln.Dial() }),
+		},
 	}
 
 	requestURI := "/foo/bar?baz=123"
@@ -613,7 +623,7 @@ func benchmarkPipelineClient(b *testing.B, parallelism int) {
 
 	maxConns := runtime.GOMAXPROCS(-1)
 	c := &PipelineClient{
-		Dial:               func(addr string) (net.Conn, error) { return ln.Dial() },
+		Dial:               newDialHelper(func(addr string) (net.Conn, error) { return ln.Dial() }),
 		ReadBufferSize:     1024 * 1024,
 		WriteBufferSize:    1024 * 1024,
 		MaxConns:           maxConns,

@@ -1,3 +1,5 @@
+//go:build other12
+
 package fasthttp
 
 import (
@@ -24,8 +26,11 @@ func (h *fsHandler) handleRequestWithError(ctx *RequestCtx) (err error) {
 	} else {
 		path = ctx.Path()
 	}
-	hasTrailingSlash := len(path) > 0 && path[len(path)-1] == '/'
-	path = stripTrailingSlashes(path)
+	var hasTrailingSlash bool
+	if len(path) > 0 && path[len(path)-1] == '/' {
+		hasTrailingSlash = true
+		path = path[:len(path)-1]
+	}
 
 	if n := bytes.IndexByte(path, 0); n >= 0 {
 		ctx.Logger().Printf("cannot serve path with nil byte at position %d: %q", n, path)
@@ -35,7 +40,6 @@ func (h *fsHandler) handleRequestWithError(ctx *RequestCtx) (err error) {
 	if h.pathRewrite != nil {
 		// There is no need to check for '/../' if path = ctx.Path(),
 		// since ctx.Path must normalize and sanitize the path.
-
 		if n := bytes.Index(path, strSlashDotDotSlash); n >= 0 {
 			ctx.Logger().Printf("cannot serve path with '/../' at position %d due to security reasons: %q", n, path)
 			err = FsDotDotSlashInPathError
@@ -43,30 +47,33 @@ func (h *fsHandler) handleRequestWithError(ctx *RequestCtx) (err error) {
 		}
 	}
 
-	mustCompress := false
+	var (
+		mustCompress bool
+		tryCompress  bool
+		fileEncoding string
+	)
 	fileCacheKind := defaultCacheKind
-	fileEncoding := ""
 	byteRange := ctx.Request.Header.peek(strRange)
-	tryCompress := false
+	//
 	if h.needCompressFunc != nil {
 		tryCompress = h.needCompressFunc(path)
 	} else {
 		tryCompress = h.compress
 	}
+	var compressorIndex int
 	if len(byteRange) == 0 && tryCompress {
-		switch {
-		case h.compressBrotli && ctx.Request.Header.HasAcceptEncodingBytes(strBr):
-			mustCompress = true
-			fileCacheKind = brotliCacheKind
-			fileEncoding = "br"
-		case ctx.Request.Header.HasAcceptEncodingBytes(strGzip):
-			mustCompress = true
-			fileCacheKind = gzipCacheKind
-			fileEncoding = "gzip"
-		case ctx.Request.Header.HasAcceptEncodingBytes(strZstd):
-			mustCompress = true
-			fileCacheKind = zstdCacheKind
-			fileEncoding = "zstd"
+		for i, en := range h.Orders {
+			if en == "" {
+				continue
+			}
+			if ctx.Request.Header.HasAcceptEncodingBytes(s2b(string(en))) {
+				compressorIndex = i
+				//compressor = h.order2pool[i]
+				fileEncoding = string(en)
+				mustCompress = true
+				fileCacheKind = h.order2kind[i]
+				break
+			}
 		}
 	}
 
@@ -76,37 +83,42 @@ func (h *fsHandler) handleRequestWithError(ctx *RequestCtx) (err error) {
 	if !ok {
 		filePath := h.pathToFilePath(pathStr)
 
-		ff, err = h.openFSFile(filePath, mustCompress, fileEncoding)
+		ff, err = h.openFSFile(filePath, pathStr, mustCompress, compressorIndex)
 		if mustCompress && err == errNoCreatePermission {
 			ctx.Logger().Printf("insufficient permissions for saving compressed file for %q. Serving uncompressed file. "+
 				"Allow write access to the directory with this file in order to improve fasthttp performance", filePath)
 			mustCompress = false
-			ff, err = h.openFSFile(filePath, mustCompress, fileEncoding)
+			ff, err = h.openFSFile(filePath, pathStr, false, compressorIndex)
 		}
 
-		if errors.Is(err, errDirIndexRequired) {
-			if !hasTrailingSlash {
-				ctx.RedirectBytes(append(path, '/'), StatusFound)
-				err = nil
-				return
+		if err != nil {
+			if errors.Is(err, errDirIndexRequired) {
+				if !hasTrailingSlash {
+					ctx.RedirectBytes(append(path, '/'), StatusFound)
+					err = nil
+					return
+				}
+				ff, err = h.openIndexFile(ctx, filePath, pathStr, mustCompress, compressorIndex)
+
+				if err != nil {
+					ctx.Logger().Printf("cannot open dir index %q: %v", filePath, err)
+					err = FsDirIndexFileCantOpenError
+					return
+				}
 			}
-			ff, err = h.openIndexFile(ctx, filePath, mustCompress, fileEncoding)
-			if err != nil {
+			if ff == nil {
 				ctx.Logger().Printf("cannot open dir index %q: %v", filePath, err)
-				err = FsDirIndexFileCantOpenError
+				//err = FsDirIndexFileCantOpenErr
+				err = FsFileNotFoundOrCantOpenError
 				return
 			}
-		} else if err != nil {
-			ctx.Logger().Printf("cannot open file %q: %v", filePath, err)
-			err = FsFileNotFoundOrCantOpenError
-			return
 		}
-
-		ff = h.cacheManager.SetFileToCache(fileCacheKind, pathStr, ff)
+		//ff = h.cacheManager.SetFileToCache(fileCacheKind, pathStr, ff)
 	}
 
 	if !ctx.IfModifiedSince(ff.lastModified) {
-		ff.decReadersCount()
+		//ff.decReadersCount()
+		ff.readersCount.Add(-1)
 		ctx.NotModified()
 		return
 	}
@@ -120,14 +132,7 @@ func (h *fsHandler) handleRequestWithError(ctx *RequestCtx) (err error) {
 
 	hdr := &ctx.Response.Header
 	if ff.compressed {
-		switch fileEncoding {
-		case "br":
-			hdr.SetContentEncodingBytes(strBr)
-		case "gzip":
-			hdr.SetContentEncodingBytes(strGzip)
-		case "zstd":
-			hdr.SetContentEncodingBytes(strZstd)
-		}
+		hdr.SetContentEncoding(fileEncoding)
 	}
 
 	statusCode := StatusOK

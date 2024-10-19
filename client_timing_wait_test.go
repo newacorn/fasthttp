@@ -47,9 +47,11 @@ func benchmarkClientGetEndToEndWaitConnInmemory(b *testing.B, parallelism int) {
 	}()
 
 	c := &Client{
-		MaxConnsPerHost:    1,
-		Dial:               func(addr string) (net.Conn, error) { return ln.Dial() },
-		MaxConnWaitTimeout: 5 * time.Second,
+		Config: Config{
+			MaxConns:           1,
+			Dial:               newDialHelper(func(addr string) (net.Conn, error) { return ln.Dial() }),
+			MaxConnWaitTimeout: 5 * time.Second,
+		},
 	}
 
 	requestURI := "/foo/bar?baz=123&sleep=10ms"
