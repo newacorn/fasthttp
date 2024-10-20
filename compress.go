@@ -3,10 +3,10 @@ package fasthttp
 import (
 	"bytes"
 	"fmt"
+	ucompress "github.com/newacorn/goutils/compress"
 	"io"
 	"io/fs"
 	"sync"
-	ucompress "utils/compress"
 
 	"github.com/klauspost/compress/flate"
 	"github.com/klauspost/compress/gzip"

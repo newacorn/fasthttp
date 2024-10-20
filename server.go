@@ -6,7 +6,9 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"github.com/newacorn/goutils"
 	pbufio "github.com/newacorn/goutils/bufio"
+	"github.com/newacorn/goutils/compress"
 	"github.com/puzpuzpuz/xsync/v3"
 	"io"
 	"log"
@@ -20,8 +22,6 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
-	"utils"
-	"utils/compress"
 )
 
 var ErrCertAndKeyMustProvided = errors.New("cert and key must be both provided")
@@ -3033,7 +3033,7 @@ func acquireByteReader(ctxP **RequestCtx) (r *bufio.Reader, err error) {
 		tc, ok = c.(*net.TCPConn)
 	}
 	if ok {
-		n, err = utils.NoBlockingRead(tc, b[:])
+		n, err = goutils.NoBlockingRead(tc, b[:])
 		if err != nil && err != syscall.EAGAIN {
 			return
 		}

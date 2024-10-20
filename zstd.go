@@ -3,9 +3,9 @@ package fasthttp
 import (
 	"bytes"
 	"fmt"
+	ucompress "github.com/newacorn/goutils/compress"
 	"io"
 	"sync"
-	ucompress "utils/compress"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/valyala/bytebufferpool"

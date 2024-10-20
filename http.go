@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	pbufio "github.com/newacorn/goutils/bufio"
+	ucompress "github.com/newacorn/goutils/compress"
 	pio "github.com/newacorn/goutils/io"
 	pool "github.com/newacorn/simple-bytes-pool"
 	"github.com/valyala/bytebufferpool"
@@ -19,7 +20,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	ucompress "utils/compress"
 )
 
 var (

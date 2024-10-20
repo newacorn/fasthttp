@@ -1,9 +1,9 @@
 package fasthttp
 
 import (
+	"github.com/newacorn/goutils/compress"
 	pio "github.com/newacorn/goutils/io"
 	"io"
-	"utils/compress"
 )
 
 //

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/gookit/goutil/testutil/assert"
+	"github.com/newacorn/goutils/compress"
 	"github.com/puzpuzpuz/xsync/v3"
 	"github.com/valyala/fasthttp"
 	"github.com/valyala/fasthttp/fasthttputil"
@@ -20,7 +21,6 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
-	"utils/compress"
 )
 
 type TestLogger struct {

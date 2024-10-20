@@ -6,8 +6,8 @@ import (
 	"fmt"
 	pbufio "github.com/newacorn/goutils/bufio"
 	pbytes "github.com/newacorn/goutils/bytes"
+	"github.com/newacorn/goutils/compress"
 	"io"
-	"utils/compress"
 )
 
 type WriterFlusherCloser interface {
@@ -32,8 +32,7 @@ func (bw BufferedChunkedWriter) Flush() (err error) {
 	return
 }
 
-// const c = len(HeaderContentLength)
-const k = HeaderContentLength + ": "
+const contentLengthColonSpace = HeaderContentLength + ": "
 
 type ChunkedWriter struct {
 	*bufio.Writer
@@ -104,7 +103,7 @@ func (resp *Response) WriteCompress(w *bufio.Writer) (err error) {
 	}
 	// write content-length
 	tmp := make([]byte, 32)
-	n1 := copy(tmp, k)
+	n1 := copy(tmp, contentLengthColonSpace)
 	n2 := copy(tmp[n1:], AppendUintInto(tmp[n1:], buf.Len()))
 	n3 := copy(tmp[n1+n2:], "\r\n\r\n")
 	_, err = w.Write(tmp[:n1+n2+n3])

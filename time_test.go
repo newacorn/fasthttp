@@ -1,10 +1,10 @@
 package fasthttp
 
 import (
+	"github.com/newacorn/goutils"
 	"net"
 	"testing"
 	"time"
-	"utils"
 )
 
 func TestAbsoluteToUnix(t *testing.T) {
@@ -50,7 +50,7 @@ func TestStruct(t *testing.T) {
 	//c1.Read()
 	var p [1]byte
 	if ok {
-		n, err := utils.NoBlockingRead(c1, p[:])
+		n, err := goutils.NoBlockingRead(c1, p[:])
 		_ = n
 		if err != nil {
 			t.Log(err)

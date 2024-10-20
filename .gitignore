@@ -7,4 +7,3 @@ tags
 .DS_Store
 vendor/
 testdata/fuzz
-testdata2/cantAccess

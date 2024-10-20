@@ -15,10 +15,10 @@ var defaultClientCleaner = DurationCleaner{
 	minDuration: time.Millisecond * 500,
 }
 
-func RegisterCleanableItem(client CleanableItem, duration time.Duration) {
+func registerCleanableItem(client CleanableItem, duration time.Duration) {
 	defaultClientCleaner.Register(client, duration)
 }
-func StopDurationCleaner() {
+func stopDurationCleaner() {
 	defaultClientCleaner.Stop()
 }
 

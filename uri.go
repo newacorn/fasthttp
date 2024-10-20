@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/newacorn/goutils"
 	"io"
 	"path/filepath"
 	"strconv"
 	"sync"
-	"utils"
 )
 
 // AcquireURI returns an empty URI instance from the pool.
@@ -211,7 +211,7 @@ func (u *URI) Scheme() []byte {
 // If the result is enclosed in square brackets, as literal IPv6 addresses are,
 // the square brackets are removed from the result.
 func (u *URI) Hostname() string {
-	host, _ := utils.SplitHostAndPortStd(b2s(u.host))
+	host, _ := goutils.SplitHostAndPortStd(b2s(u.host))
 	return host
 }
 
@@ -219,7 +219,7 @@ func (u *URI) Hostname() string {
 //
 // If u.Host doesn't contain a valid numeric port, Port returns an empty string.
 func (u *URI) Port() string {
-	_, port := utils.SplitHostAndPortStd(b2s(u.host))
+	_, port := goutils.SplitHostAndPortStd(b2s(u.host))
 	return port
 }
 

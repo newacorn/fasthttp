@@ -3,12 +3,12 @@ package fasthttp
 import (
 	"bytes"
 	"fmt"
-	"github.com/google/brotli/go/cbrotli"
+	"github.com/newacorn/cbrotli/go/cbrotli"
+	ucompress "github.com/newacorn/goutils/compress"
 	"io"
 	"sync"
-	ucompress "utils/compress"
 
-	"github.com/andybalholm/brotli"
+	"github.com/newacorn/brotli"
 	"github.com/valyala/bytebufferpool"
 	"github.com/valyala/fasthttp/stackless"
 )

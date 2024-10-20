@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"github.com/gookit/goutil/testutil/assert"
+	"github.com/newacorn/goutils/compress"
 	"github.com/valyala/fasthttp"
 	"golang.org/x/net/proxy"
 	"log"
@@ -13,7 +14,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-	"utils/compress"
 )
 
 type ProxyTCPDialer struct {

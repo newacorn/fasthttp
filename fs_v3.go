@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	pbytes "github.com/newacorn/goutils/bytes"
+	"github.com/newacorn/goutils/compress"
+	"github.com/newacorn/goutils/http"
 	pool "github.com/newacorn/simple-bytes-pool"
 	"github.com/puzpuzpuz/xsync/v3"
 	"html"
@@ -19,8 +21,6 @@ import (
 	"sync/atomic"
 	"time"
 	"unsafe"
-	"utils/compress"
-	"utils/http"
 )
 
 // MaxSmallFileSize Files bigger than this size are sent with sendfile.

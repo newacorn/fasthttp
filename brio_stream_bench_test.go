@@ -5,16 +5,16 @@ import (
 	gbytes "bytes"
 	"compress/gzip"
 	"fmt"
-	"github.com/andybalholm/brotli"
 	"github.com/gookit/goutil/testutil/assert"
+	"github.com/newacorn/brotli"
 	"github.com/newacorn/goutils/bytes"
+	"github.com/newacorn/goutils/compress"
 	bpool "github.com/newacorn/simple-bytes-pool"
 	"github.com/xyproto/randomstring"
 	"io"
 	"log"
 	"strconv"
 	"testing"
-	"utils/compress"
 )
 
 func BenchmarkBodyCompress(b *testing.B) {

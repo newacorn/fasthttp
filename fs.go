@@ -6,9 +6,15 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/klauspost/compress/gzip"
+	"github.com/klauspost/compress/zstd"
+	"github.com/newacorn/brotli"
 	pbytes "github.com/newacorn/goutils/bytes"
+	"github.com/newacorn/goutils/compress"
+	"github.com/newacorn/goutils/http"
 	pool "github.com/newacorn/simple-bytes-pool"
 	"github.com/puzpuzpuz/xsync/v3"
+	"github.com/valyala/bytebufferpool"
 	"html"
 	"io"
 	"io/fs"
@@ -22,15 +28,6 @@ import (
 	"sync/atomic"
 	"time"
 	"unsafe"
-	"utils/compress"
-	"utils/http"
-
-	//"utils/http"
-
-	"github.com/andybalholm/brotli"
-	"github.com/klauspost/compress/gzip"
-	"github.com/klauspost/compress/zstd"
-	"github.com/valyala/bytebufferpool"
 )
 
 // ServeFileBytesUncompressed returns HTTP response containing file contents

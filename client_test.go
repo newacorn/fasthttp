@@ -6,7 +6,8 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"golang.org/x/text/encoding/simplifiedchinese"
+	"github.com/newacorn/goutils/compress"
+	"github.com/valyala/fasthttp/fasthttputil"
 	"io"
 	"net"
 	"net/http"
@@ -20,10 +21,6 @@ import (
 	"syscall"
 	"testing"
 	"time"
-	"utils/compress"
-	"utils/transform"
-
-	"github.com/valyala/fasthttp/fasthttputil"
 )
 
 func newDialHelper(dial func(addr string) (net.Conn, error)) Dialer {
@@ -3888,43 +3885,6 @@ func TestHostClientRedirect(t *testing.T) {
 	err = hc.DoRedirects(req, resp, 100)
 	if err != ErrHostClientRedirectToDifferentHost {
 		t.Fatal(err)
-	}
-}
-
-func Test(t *testing.T) {
-	t.Skip()
-	var cli Client
-	req := AcquireRequest()
-	resp := AcquireResponse()
-	defer func() {
-		ReleaseRequest(req)
-		ReleaseResponse(resp)
-	}()
-	reqURL := `https://www.jxjyedu.org.cn/student/chapterlist.jsp?id=202372&idle=55`
-	req.SetRequestURI(reqURL)
-	err := cli.Do(req, resp)
-	if err != nil {
-		t.Fatal(err)
-	}
-	en := resp.Header.Peek(HeaderContentEncoding)
-	body := resp.Body()
-	if len(en) > 0 {
-		err, br := DecodeEncoding(bytes.NewReader(body), b2s(en))
-		if err != nil {
-			t.Fatal(err)
-		}
-		body, err = io.ReadAll(br)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	ch := resp.Header.Charset()
-	if b2s(ch) == CharsetGBK {
-		r := transform.NewReader(bytes.NewReader(resp.Body()), simplifiedchinese.GBK.NewDecoder())
-		body, err = ReadAll(r)
-		if err != nil {
-			t.Fatal(err)
-		}
 	}
 }
 

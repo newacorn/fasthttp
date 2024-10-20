@@ -438,7 +438,7 @@ func (c *Client) createHostClient(host string, isTLS bool) (hc *HostClient, err 
 				if c.MaxIdleConnDuration == 0 {
 					du = DefaultMaxIdleConnDuration
 				}
-				RegisterCleanableItem(c, du)
+				registerCleanableItem(c, du)
 				c.cleanStart = true
 			}
 			if c.ConfigureClient != nil {
@@ -472,7 +472,7 @@ func (c *Client) AddHostClient(host string, hc *HostClient) {
 		if du == 0 {
 			du = DefaultMaxIdleConnDuration
 		}
-		RegisterCleanableItem(c, du)
+		registerCleanableItem(c, du)
 		c.cleanStart = true
 	}
 	c.mLock.Unlock()
@@ -1529,7 +1529,7 @@ func (c *HostClient) acquireConn(dialTimeout, writeTimeout time.Duration, connec
 			c.connsCount++
 			createConn = true
 			if !c.connsCleanerRun && !connectionClose && c.maxIdleConnDuration > 0 {
-				RegisterCleanableItem(c, c.maxIdleConnDuration)
+				registerCleanableItem(c, c.maxIdleConnDuration)
 				c.connsCleanerRun = true
 			}
 		}

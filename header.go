@@ -5,11 +5,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/newacorn/goutils/compress"
 	"io"
 	"sync"
 	"sync/atomic"
 	"time"
-	"utils/compress"
 )
 
 const (
