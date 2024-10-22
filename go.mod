@@ -10,7 +10,7 @@ require (
 	github.com/klauspost/compress v1.17.11
 	github.com/newacorn/brotli v0.0.0-20241020004304-ec39f4a41287
 	github.com/newacorn/cbrotli/go/cbrotli v0.0.0-20241020012012-8fb4aa8de81a
-	github.com/newacorn/goutils v0.0.0-20241020013356-15e1e4834c16
+	github.com/newacorn/goutils v0.0.0-20241022025729-8d132f19b74b
 	github.com/newacorn/simple-bytes-pool v0.0.0-20241019202108-1ca97a547e01
 	github.com/pkg/errors v0.9.1
 	github.com/puzpuzpuz/xsync/v3 v3.4.0

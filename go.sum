@@ -29,6 +29,8 @@ github.com/newacorn/compress v0.0.0-20241020002001-be411bf4ca21 h1:8XicvZROKa/PN
 github.com/newacorn/compress v0.0.0-20241020002001-be411bf4ca21/go.mod h1:Di0epgTjJY877eYKx5yC51cX2A2Vl2ibi7bDH9ttBbw=
 github.com/newacorn/goutils v0.0.0-20241020013356-15e1e4834c16 h1:RDHDno4av2jsRnQN9+98OQvMaXojAB2hmIGzgJiP1xE=
 github.com/newacorn/goutils v0.0.0-20241020013356-15e1e4834c16/go.mod h1:qjtV7AwRt23XbTQ5yiyXoWmFwU67TUGLpMl6//knC6s=
+github.com/newacorn/goutils v0.0.0-20241022025729-8d132f19b74b h1:U0tGP3Ura7tOZjWQhUEADAKaftIpO8R5jlnjtUfF22Q=
+github.com/newacorn/goutils v0.0.0-20241022025729-8d132f19b74b/go.mod h1:qjtV7AwRt23XbTQ5yiyXoWmFwU67TUGLpMl6//knC6s=
 github.com/newacorn/simple-bytes-pool v0.0.0-20241019202108-1ca97a547e01 h1:6vk+EI/swL10uzvOd6d0L1f6N4Fl2diV/OfQ/9RKKSg=
 github.com/newacorn/simple-bytes-pool v0.0.0-20241019202108-1ca97a547e01/go.mod h1:xFGWrrp5OYMtHB62gXV/ZI9C59pvJCSRJ3kMryw9+EY=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=
