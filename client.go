@@ -1340,7 +1340,7 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 		}
 
 		retry, err = c.do(req, resp)
-		if err == nil || !retry {
+		if err == nil {
 			break
 		}
 
