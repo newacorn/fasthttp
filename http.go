@@ -2758,17 +2758,65 @@ func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int64) (err error) {
 	return
 }
 
+// copyZeroAlloc optimizes io.Copy by calling ReadFrom or WriteTo only when
+// copying between os.File and net.TCPConn. If the reader has a WriteTo
+// method, it uses WriteTo for copying; if the writer has a ReadFrom method,
+// it uses ReadFrom for copying. If neither method is available, it gets a
+// buffer from sync.Pool to perform the copy.
+//
+// io.CopyBuffer always uses the WriterTo or ReadFrom interface if it's
+// available. however, os.File and net.TCPConn unfortunately have a
+// fallback in their WriterTo that calls io.Copy if sendfile isn't possible.
+//
+// See issue: https://github.com/valyala/fasthttp/issues/1889
+//
+// sendfile can only be triggered when copying between os.File and net.TCPConn.
+// Since the function confirming zero-copy is a private function, we use
+// ReadFrom only in this specific scenario. For all other cases, we prioritize
+// using our own copyBuffer method.
+//
+// o: our copyBuffer
+// r: readFrom
+// w: writeTo
+//
+// write\read *File  *TCPConn  writeTo  other
+// *File        o       r         w       o
+// *TCPConn    w,r      o         w       o
+// readFrom     r       r         w       r
+// other        o       o         w       o
 func copyZeroAlloc(w io.Writer, r io.Reader) (n int64, err error) {
-	// Below repeat as io.CopyBuffer, because we can delay get buf from pool. if first two
-	// assert stratify.
-	if wt, ok := r.(io.WriterTo); ok {
-		return wt.WriteTo(w)
-	}
+	var readerIsFile, readerIsConn bool
 
-	if rt, ok := w.(io.ReaderFrom); ok {
-		return rt.ReadFrom(r)
+	switch r := r.(type) {
+	case *os.File:
+		readerIsFile = true
+	case *net.TCPConn:
+		readerIsConn = true
+	case io.WriterTo:
+		return r.WriteTo(w)
 	}
-
+	switch w := w.(type) {
+	case *os.File:
+		if readerIsConn {
+			return w.ReadFrom(r)
+		}
+	case *net.TCPConn:
+		if readerIsFile {
+			// net.WriteTo requires go1.22 or later
+			// Benchmark tests show that on Windows, WriteTo performs
+			// significantly better than ReadFrom. On Linux, however,
+			// ReadFrom slightly outperforms WriteTo. When possible,
+			// copyZeroAlloc aims to perform  better than or as well
+			// as io.Copy, so we use WriteTo whenever possible for
+			// optimal performance.
+			if rt, ok := r.(io.WriterTo); ok {
+				return rt.WriteTo(w)
+			}
+			return w.ReadFrom(r)
+		}
+	case io.ReaderFrom:
+		return w.ReadFrom(r)
+	}
 	buf := pool.Get(32 * 1024)
 	buf.B = buf.B[:cap(buf.B)]
 	n, err = pio.CopyBufferMust(w, r, buf.B)
